@@ -6,12 +6,14 @@ set -euo pipefail
 #   BRANCH=main
 #   PM2_API_APP_NAME=labbit-api
 #   PM2_MONITORING_APP_NAME=labbit-monitoring
+#   SKIP_MONITORING=1
 #   HEALTHCHECK_URL=http://127.0.0.1:8000/health
 
 APP_DIR="${APP_DIR:-/opt/labbit-py}"
 BRANCH="${BRANCH:-main}"
 PM2_API_APP_NAME="${PM2_API_APP_NAME:-labbit-api}"
 PM2_MONITORING_APP_NAME="${PM2_MONITORING_APP_NAME:-labbit-monitoring}"
+SKIP_MONITORING="${SKIP_MONITORING:-0}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8000/health}"
 HEALTHCHECK_RETRIES="${HEALTHCHECK_RETRIES:-20}"
 HEALTHCHECK_DELAY_SECONDS="${HEALTHCHECK_DELAY_SECONDS:-3}"
@@ -46,11 +48,15 @@ else
   pm2 start "${APP_DIR}/start.sh" --name "${PM2_API_APP_NAME}" --interpreter /usr/bin/bash
 fi
 
-echo "==> Start/restart PM2 monitoring service (${PM2_MONITORING_APP_NAME})"
-if pm2 describe "${PM2_MONITORING_APP_NAME}" >/dev/null 2>&1; then
-  pm2 restart "${PM2_MONITORING_APP_NAME}" --update-env
+if [ "${SKIP_MONITORING}" = "1" ]; then
+  echo "==> Skipping monitoring service restart (SKIP_MONITORING=1)"
 else
-  pm2 start "${APP_DIR}/scripts/start-monitoring.sh" --name "${PM2_MONITORING_APP_NAME}" --interpreter /usr/bin/bash
+  echo "==> Start/restart PM2 monitoring service (${PM2_MONITORING_APP_NAME})"
+  if pm2 describe "${PM2_MONITORING_APP_NAME}" >/dev/null 2>&1; then
+    pm2 restart "${PM2_MONITORING_APP_NAME}" --update-env
+  else
+    pm2 start "${APP_DIR}/scripts/start-monitoring.sh" --name "${PM2_MONITORING_APP_NAME}" --interpreter /usr/bin/bash
+  fi
 fi
 
 pm2 save
