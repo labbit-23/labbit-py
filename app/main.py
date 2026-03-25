@@ -33,7 +33,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s"
 )
 
-app = FastAPI()
+app = FastAPI(
+    root_path=os.getenv("FASTAPI_ROOT_PATH", "/py")
+)
 
 
 class DeliveryStatusUpdateRequest(BaseModel):
