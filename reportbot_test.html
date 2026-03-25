@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ReportBot Test</title>
+<style>
+body{
+    font-family: Arial;
+    margin:40px;
+}
+
+input,button{
+    padding:8px;
+    margin:5px;
+    width:300px;
+}
+
+#response{
+    margin-top:20px;
+    padding:10px;
+    border:1px solid #ccc;
+    background:#f5f5f5;
+}
+</style>
+</head>
+
+<body>
+
+<h2>ReportBot Test</h2>
+
+<label>Phone Number</label><br>
+<input id="phone" placeholder="9949099249"><br>
+
+<label>Message</label><br>
+<input id="message" placeholder="report or 1"><br>
+
+<button onclick="sendRequest()">Send</button>
+
+<div id="response"></div>
+
+<script>
+
+async function sendRequest(){
+
+    const phone = document.getElementById("phone").value;
+    const message = document.getElementById("message").value;
+
+    const payload = {
+        phone: phone,
+        message: message
+    };
+
+    try{
+
+        const res = await fetch("http://YOUR_MIRTH_SERVER:8080/reportbot",{
+            method:"POST",
+            headers:{
+                "Content-Type":"application/json"
+            },
+            body:JSON.stringify(payload)
+        });
+
+        const text = await res.text();
+
+        document.getElementById("response").innerHTML =
+        "<b>Response:</b><br>"+text;
+
+    }catch(err){
+
+        document.getElementById("response").innerHTML =
+        "Error: "+err;
+
+    }
+
+}
+
+</script>
+
+</body>
+</html>

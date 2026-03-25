@@ -1,0 +1,38 @@
+[server]
+base_url = http://120.138.8.37:9999
+context = shivam
+
+[api]
+lookup_url = http://120.138.8.37:7777/clouduat/TApiQuery
+terminalid = YOUR_TERMINAL_ID
+webformid = wf269
+lookup_direct = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf275&terminalid=YOUR_TERMINAL_ID
+reportstatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf270&terminalid=YOUR_TERMINAL_ID
+reportstatusreqidapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf274&terminalid=YOUR_TERMINAL_ID
+getrequisitionsbydateapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf271&terminalid=YOUR_TERMINAL_ID
+updatedeliverystatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf272&terminalid=YOUR_TERMINAL_ID
+getdeliverystatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf273&terminalid=YOUR_TERMINAL_ID
+
+[login]
+username = admin
+password = CHANGE_ME_OR_USE_ENV
+
+[defaults]
+reg = 0
+version = 9.4.56
+clienttype = Regular
+
+[paths]
+reports = reports
+logs = logs
+backgroundpath = assets/background.png
+
+[trends]
+url = http://120.138.8.37:9999/shivam/globalreport
+
+[whatsapp]
+send_reports_template = reports_pdf
+whatsapp_api_key = CHANGE_ME_OR_USE_ENV
+default_phone =
+fallback_phone =
+whatsapp_endpoint =

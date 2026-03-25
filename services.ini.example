@@ -1,0 +1,31 @@
+[monitoring]
+enabled = 1
+lab_id = YOUR_LAB_ID
+source = neosoft-edge-1-vps
+ingest_url = https://api.sdrc.in/api/cto/ingest
+ingest_token = ENV:CTO_INGEST_TOKEN
+interval_seconds = 60
+scheduler_tick_seconds = 15
+request_timeout_seconds = 8
+
+[service:local_fetchreports_health]
+type = http_json
+enabled = 1
+category = python
+label = Fetchreports Health
+url = http://127.0.0.1:8000/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1000
+interval_seconds = 60
+
+[service:labbit_health]
+type = http_json
+enabled = 1
+category = app
+label = Labbit Health
+url = https://api.sdrc.in/api/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1500
+interval_seconds = 60
