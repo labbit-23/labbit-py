@@ -41,6 +41,19 @@ Deploy both:
 bash /opt/labbit-py/scripts/deploy-vps-api.sh
 ```
 
+Or use ecosystem file for both services + env in one place:
+```bash
+cd /opt/labbit-py
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+After editing env values in `ecosystem.config.cjs`:
+```bash
+pm2 restart ecosystem.config.cjs --update-env
+pm2 save
+```
+
 ## Structure
 
 - `app/` core application modules
