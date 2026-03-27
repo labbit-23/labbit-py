@@ -26,6 +26,31 @@ def row_value(row, *keys):
     return None
 
 
+def first_non_empty(rows, *keys):
+
+    if not isinstance(rows, list):
+        return None
+
+    for row in rows:
+        value = row_value(row, *keys)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+
+    return None
+
+
+def normalize_phone(value):
+
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if not digits:
+        return None
+
+    return digits[-10:]
+
+
 # -----------------------------
 # NEW: Common processor (NON-BREAKING)
 # -----------------------------
@@ -66,14 +91,27 @@ def _process_status_rows(rows, identifier):
     else:
         overall = "NO_REPORT"
 
+    reqno_resolved = first_non_empty(rows, "REQNO", "reqno") or str(identifier)
+    reqid_resolved = first_non_empty(rows, "REQID", "reqid")
+    patient_name = first_non_empty(rows, "PATIENTNM", "patientnm", "PATIENT_NAME", "patient_name", "PATNAME", "patname", "NAME", "name")
+    mrno = first_non_empty(rows, "MRNO", "mrno", "CREGNO", "cregno", "UHID", "uhid")
+    raw_phone = first_non_empty(rows, "PHONENO", "phoneno", "MOBILENO", "mobileno", "PHONE", "phone")
+    test_date = first_non_empty(rows, "REQDT", "reqdt", "TEST_DATE", "test_date", "REQDATE", "reqdate", "BOOKING_DATE", "booking_date")
+
     return {
         # keep original key for compatibility
-        "reqno": identifier,
+        "reqno": reqno_resolved,
+        "reqid": reqid_resolved,
         "overall_status": overall,
         "lab_total": lab_total,
         "lab_ready": lab_ready,
         "radiology_total": radiology_total,
         "radiology_ready": radiology_ready,
+        "patient_name": patient_name,
+        "mrno": mrno,
+        "patient_phone": normalize_phone(raw_phone),
+        "phoneno": raw_phone,
+        "test_date": test_date,
         "tests": rows
     }
 
