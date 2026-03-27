@@ -108,7 +108,7 @@ def download_radiology(reqid):
 # -----------------------------
 # Process ALL Radiology Files
 # -----------------------------
-def process_radiology_files(reqid):
+def process_radiology_files(reqid, apply_background_overlay=True):
 
     raw_files = download_radiology(reqid)
 
@@ -116,11 +116,13 @@ def process_radiology_files(reqid):
 
     for i, raw in enumerate(raw_files):
 
-        out = os.path.join(OUTPUT_DIR, f"RAD_{reqid}_{i}.pdf")
-
-        apply_background(raw, out, BG_PATH)
-
-        final_files.append(out)
+        if apply_background_overlay:
+            out = os.path.join(OUTPUT_DIR, f"RAD_{reqid}_{i}.pdf")
+            apply_background(raw, out, BG_PATH)
+            final_files.append(out)
+        else:
+            # Plain mode: keep source radiology file without adding background overlay.
+            final_files.append(raw)
 
     return final_files
 
@@ -128,9 +130,9 @@ def process_radiology_files(reqid):
 # -----------------------------
 # Public function (REQID based)
 # -----------------------------
-def get_radiology_report(reqid):
+def get_radiology_report(reqid, apply_background_overlay=True):
 
-    final_files = process_radiology_files(reqid)
+    final_files = process_radiology_files(reqid, apply_background_overlay=apply_background_overlay)
 
     if len(final_files) == 1:
         return final_files[0]

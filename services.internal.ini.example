@@ -1,0 +1,154 @@
+[monitoring]
+enabled = 1
+lab_id = YOUR_LAB_ID
+source = office-internal-monitor
+ingest_url = https://lab.sdrc.in/api/cto/ingest
+ingest_token = ENV:CTO_INGEST_TOKEN
+interval_seconds = 60
+scheduler_tick_seconds = 15
+request_timeout_seconds = 8
+
+[group:internet_edge]
+label = Internet / WAN
+services = mirth_lab,mirth_dicom,orthanc_main
+failure_condition = all_down
+severity = critical
+message = Likely internet, VPN, or upstream network issue
+
+[group:cloud_server]
+label = Cloud Server CtrlS
+services = oracle_db,tomcat_7,tomcat_9
+failure_condition = all_down
+severity = critical
+message = Likely cloud server outage or host-level problem
+
+[group:local_edge]
+label = Local Edge / Python
+services = monitoring_agent,auto_send_reports,machine_bridge,ecg_sender,dicom_worker
+failure_condition = majority_down
+severity = high
+message = Likely local edge system or LAN issue
+
+[group:machine_interfacing]
+label = Machine Interfacing
+services = mirth_lab,mirth_dicom,orthanc_main
+failure_condition = any_down
+severity = high
+message = Likely Mirth, DICOM, or machine interfacing issue
+
+[service:mirth_dicom]
+type = http_json
+enabled = 1
+category = mirth
+label = Mirth DICOM
+url = https://100.103.168.62:8443/api/server/version
+method = GET
+expected_status = 200
+slow_threshold_ms = 2000
+verify_ssl = 0
+header_x_requested_with = OpenAPI
+interval_seconds = 60
+
+[service:mirth_lab]
+type = http_json
+enabled = 1
+category = mirth
+label = Mirth Lab
+url = https://100.71.105.110:8443/api/server/version
+method = GET
+expected_status = 200
+slow_threshold_ms = 2000
+verify_ssl = 0
+header_x_requested_with = OpenAPI
+interval_seconds = 60
+
+[service:orthanc_main]
+type = http_json_auth
+enabled = 1
+category = orthanc
+label = Orthanc Main
+url = http://100.84.172.71:8042/system
+method = GET
+username = ENV:ORTHANC_USERNAME
+password = ENV:ORTHANC_PASSWORD
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 120
+
+[service:oracle_db]
+type = tcp
+enabled = 1
+category = database
+label = Oracle DB
+host = 120.138.8.37
+port = 1521
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:tomcat_7]
+type = tcp
+enabled = 1
+category = app
+label = Tomcat 7
+host = 120.138.8.37
+port = 9999
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:tomcat_9]
+type = tcp
+enabled = 1
+category = app
+label = Tomcat 9
+host = 120.138.8.37
+port = 7777
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:monitoring_agent]
+type = heartbeat_file
+enabled = 1
+category = python
+label = Monitoring Agent Heartbeat
+path = /var/tmp/fetchreports/monitoring_agent_heartbeat.json
+max_age_seconds = 180
+interval_seconds = 30
+
+[service:auto_send_reports]
+type = heartbeat_file
+enabled = 1
+category = python
+label = Auto Send Reports
+path = /var/tmp/fetchreports/auto_send_reports_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30
+
+[service:machine_bridge]
+type = heartbeat_file
+enabled = 1
+category = python
+label = Machine Bridge
+path = /var/tmp/fetchreports/machine_bridge_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30
+
+[service:ecg_sender]
+type = heartbeat_file
+enabled = 1
+category = python
+label = ECG Sender
+path = /var/tmp/fetchreports/ecg_sender_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30
+
+[service:dicom_worker]
+type = heartbeat_file
+enabled = 1
+category = python
+label = DICOM Worker
+path = /var/tmp/fetchreports/dicom_worker_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30

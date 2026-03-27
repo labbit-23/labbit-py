@@ -135,19 +135,24 @@ def ensure_session():
 # -----------------------------
 # Download report
 # -----------------------------
-def download_report(reqid):
+def download_report(reqid, include_header=True, printtype="1", reqno=None):
 
     ensure_session()
 
     print("Fetching report:", reqid)
 
-    r = session.get(f"{APP}/ReportDispatchPrints", params={
-        "chkrephead": "1",
+    params = {
+        "chkrephead": "1" if include_header else "0",
         "reqid": reqid,
         "ptype": "0",
         "calledfrom": "2",
-        "printtype": "1"
-    })
+        "printtype": str(printtype or "1")
+    }
+
+    if reqno:
+        params["reqno"] = str(reqno)
+
+    r = session.get(f"{APP}/ReportDispatchPrints", params=params)
 
     # Lab report
     if "application/pdf" in r.headers.get("Content-Type", ""):
@@ -166,10 +171,16 @@ def download_report(reqid):
 
         return path
 
-    # Radiology placeholder
-    print("Non-PDF response — likely radiology report")
+    # Non-PDF response handling.
+    response_text = (r.text or "")[:1200].strip().lower()
 
-    raise Exception("Radiology report handling not implemented yet")
+    if str(printtype or "1") == "0":
+        # Pending dispatcher mode: no pending output should be treated as a clean business case.
+        if "no record" in response_text or "no pending" in response_text or "already" in response_text:
+            raise Exception("NO_PENDING_REPORTS")
+        raise Exception("PENDING_REPORT_NOT_AVAILABLE")
+
+    raise Exception("LAB_REPORT_NOT_AVAILABLE")
 
 # -----------------------------
 # Trend Report (MRNO based)
@@ -249,7 +260,7 @@ def get_trend_report(mrno):
 
     return path
 
-def get_combined_report(reqid):
+def get_combined_report(reqid, include_header=True, apply_radiology_background=True, printtype="1", reqno=None):
 
     files = []
 
@@ -257,7 +268,7 @@ def get_combined_report(reqid):
     # 1. Lab report
     # -----------------------------
     try:
-        lab_path = get_report(reqid)
+        lab_path = get_report(reqid, include_header=include_header, printtype=printtype, reqno=reqno)
         files.append(lab_path)
     except Exception as e:
         print("Lab not available:", e)
@@ -268,7 +279,7 @@ def get_combined_report(reqid):
     try:
         from app.radiology_fetcher import get_radiology_report
 
-        rad_path = get_radiology_report(reqid)
+        rad_path = get_radiology_report(reqid, apply_background_overlay=apply_radiology_background)
         files.append(rad_path)
     except Exception as e:
         print("Radiology not available:", e)
@@ -295,6 +306,11 @@ def get_combined_report(reqid):
 # -----------------------------
 # Public function
 # -----------------------------
-def get_report(reqid):
+def get_report(reqid, include_header=True, printtype="1", reqno=None):
 
-    return download_report(reqid)
+    return download_report(
+        reqid,
+        include_header=include_header,
+        printtype=printtype,
+        reqno=reqno
+    )

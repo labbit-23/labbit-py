@@ -146,7 +146,7 @@ def fetch_requisitions_by_date(date):
             "reqid": row.get("REQID", row.get("reqid")),
             "mrno": row.get("MRNO", row.get("mrno")),
             "patient_name": row.get("PATIENTNM", row.get("patient_name")),
-            "phoneno": row.get("PHONENO", row.get("phoneno"))
+            "phoneno": row.get("PHONENO", row.get("phoneno", row.get("MOBILENO", row.get("mobileno"))))
         })
 
     return {

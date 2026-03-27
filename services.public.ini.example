@@ -1,0 +1,102 @@
+[monitoring]
+enabled = 1
+lab_id = YOUR_LAB_ID
+source = vps-public-monitor
+ingest_url = https://lab.sdrc.in/api/cto/ingest
+ingest_token = ENV:CTO_INGEST_TOKEN
+interval_seconds = 60
+scheduler_tick_seconds = 15
+request_timeout_seconds = 8
+
+[group:public_stack]
+label = Public App Stack
+services = labbit_health,local_fetchreports_health,funnel_mirth_public,funnel_mirth_health,supabase_main
+failure_condition = any_down
+severity = critical
+message = Public app/API dependency degraded
+
+[group:bot_stack]
+label = WhatsApp Bot Stack
+services = local_fetchreports_health,report_lookup_test,report_status_test
+failure_condition = any_down
+severity = high
+message = Bot backend path degraded
+
+[service:labbit_health]
+type = http_json
+enabled = 1
+category = app
+label = Labbit Health
+url = https://lab.sdrc.in/api/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1500
+interval_seconds = 60
+
+[service:local_fetchreports_health]
+type = http_json
+enabled = 1
+category = python
+label = Fetchreports Health
+url = http://127.0.0.1:8000/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1000
+interval_seconds = 60
+
+[service:report_lookup_test]
+type = http_json
+enabled = 1
+category = neosoft
+label = Report Lookup Test
+url = http://127.0.0.1:8000/lookup/9949099249
+method = GET
+expected_status = 200
+slow_threshold_ms = 2500
+interval_seconds = 300
+
+[service:report_status_test]
+type = http_json
+enabled = 1
+category = neosoft
+label = Report Status Test
+url = http://127.0.0.1:8000/report-status/20260315001
+method = GET
+expected_status = 200
+slow_threshold_ms = 2500
+interval_seconds = 300
+
+[service:funnel_mirth_public]
+type = tcp
+enabled = 1
+category = public_ingress
+label = Funnel Public HTTPS
+host = sdrc.tail950b5e.ts.net
+port = 8000
+timeout_seconds = 4
+slow_threshold_ms = 1000
+interval_seconds = 60
+
+[service:funnel_mirth_health]
+type = http_json
+enabled = 1
+category = python
+label = Funnel Health Endpoint
+url = https://sdrc.tail950b5e.ts.net/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 60
+
+[service:supabase_main]
+type = http_json
+enabled = 1
+category = platform
+label = Supabase
+url = https://ctaflbscmaxfyksywbny.supabase.co/rest/v1/
+header_apikey = ENV:SUPABASE_ANON_KEY
+header_authorization = ENV:SUPABASE_ANON_KEY
+method = GET
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 300
