@@ -20,20 +20,6 @@ module.exports = {
         DEFAULT_PHONE: "",
         FALLBACK_PHONE: ""
       }
-    },
-    {
-      name: "labbit-monitoring",
-      cwd: "/opt/labbit-py",
-      script: "/opt/labbit-py/scripts/start-monitoring.sh",
-      interpreter: "/usr/bin/bash",
-      autorestart: true,
-      watch: false,
-      max_restarts: 10,
-      env: {
-        MONITORING_SERVICES_INI: "/opt/labbit-py/services.ini",
-        MONITORING_LOG_PATH: "/opt/labbit-py/logs/monitoring.log",
-        CTO_INGEST_TOKEN: ""
-      }
     }
   ]
 };
