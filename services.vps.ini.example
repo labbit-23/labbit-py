@@ -1,0 +1,166 @@
+[monitoring]
+enabled = 1
+lab_id = b539c161-1e2b-480b-9526-d4b37bd37b1e
+source = vps-public-monitor
+node_role = vps
+ingest_url = https://lab.sdrc.in/api/cto/ingest
+ingest_token = PUT_CTO_INGEST_TOKEN_HERE
+interval_seconds = 60
+scheduler_tick_seconds = 15
+request_timeout_seconds = 8
+
+[group:public_stack]
+run_on = vps
+label = Public App Stack
+services = labbit_health,local_fetchreports_health,report_lookup_test,report_status_test,supabase_main,labbit_booking_test
+failure_condition = any_down
+severity = critical
+message = Public app/API dependency degraded
+
+[group:cloud_server]
+run_on = vps
+label = Cloud Server CtrlS
+services = oracle_db,tomcat_7,tomcat_9
+failure_condition = all_down
+severity = critical
+message = Likely cloud server outage or host-level problem
+
+[service:labbit_health]
+type = http_json
+enabled = 1
+run_on = vps
+category = app
+label = Labbit Health
+url = https://lab.sdrc.in/api/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1500
+interval_seconds = 60
+
+[service:local_fetchreports_health]
+type = http_json
+enabled = 1
+run_on = vps
+category = python
+label = Fetchreports Health
+url = http://127.0.0.1:8000/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 1000
+interval_seconds = 60
+
+[service:report_lookup_test]
+type = http_json
+enabled = 1
+run_on = vps
+category = neosoft
+label = Report Lookup Test
+url = http://127.0.0.1:8000/lookup/9949099249
+method = GET
+expected_status = 200
+slow_threshold_ms = 2500
+interval_seconds = 300
+
+[service:report_status_test]
+type = http_json
+enabled = 1
+run_on = vps
+category = neosoft
+label = Report Status Test
+url = http://127.0.0.1:8000/report-status/20260315001
+method = GET
+expected_status = 200
+slow_threshold_ms = 2500
+interval_seconds = 300
+
+[service:labbit_booking_test]
+type = http_json
+enabled = 0
+run_on = vps
+category = app
+label = Labbit Booking Flow Test
+url = http://localhost:3000/api/admin/bookings?date=2026-03-17
+method = GET
+expected_status = 200
+slow_threshold_ms = 2500
+interval_seconds = 600
+
+[service:supabase_main]
+type = http_json
+enabled = 1
+run_on = vps
+category = platform
+label = Supabase
+url = https://ctaflbscmaxfyksywbny.supabase.co/rest/v1/
+header_apikey = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0YWZsYnNjbWF4Znlrc3l3Ym55Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5OTkwNzMsImV4cCI6MjA2NTU3NTA3M30.Uo8Nye73gBDYty7OA5JCU0qk1STMN3N_CP1sPzQmNUE
+header_authorization = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0YWZsYnNjbWF4Znlrc3l3Ym55Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5OTkwNzMsImV4cCI6MjA2NTU3NTA3M30.Uo8Nye73gBDYty7OA5JCU0qk1STMN3N_CP1sPzQmNUE
+method = GET
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 300
+
+[service:oracle_db]
+type = tcp
+enabled = 1
+run_on = vps
+category = database
+label = Oracle DB
+host = 120.138.8.37
+port = 1521
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:tomcat_7]
+type = tcp
+enabled = 1
+run_on = vps
+category = app
+label = Tomcat 7
+host = 120.138.8.37
+port = 9999
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:tomcat_9]
+type = tcp
+enabled = 1
+run_on = vps
+category = app
+label = Tomcat 9
+host = 120.138.8.37
+port = 7777
+timeout_seconds = 4
+slow_threshold_ms = 1200
+interval_seconds = 60
+
+[service:local_delivery_engine]
+type = heartbeat_file
+enabled = 0
+run_on = both
+category = python
+label = Delivery Engine Heartbeat
+path = /var/tmp/fetchreports/delivery_engine_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30
+
+[service:monitoring_agent]
+type = heartbeat_file
+enabled = 0
+run_on = both
+category = python
+label = Monitoring Agent Heartbeat
+path = /var/tmp/fetchreports/monitoring_agent_heartbeat.json
+max_age_seconds = 180
+interval_seconds = 30
+
+[service:machine_bridge]
+type = heartbeat_file
+enabled = 0
+run_on = both
+category = python
+label = Machine Bridge
+path = /var/tmp/fetchreports/machine_bridge_heartbeat.json
+max_age_seconds = 300
+interval_seconds = 30

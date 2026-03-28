@@ -62,3 +62,15 @@ pm2 save
 - `assets/` static files used by PDF tools
 - `config.ini` runtime config
 - `services.ini` monitoring service config
+
+## Monitoring Profiles (Local vs VPS)
+
+Use one of these templates as `services.ini`:
+
+- Local machine: `services.local.ini.example`
+- VPS machine: `services.vps.ini.example`
+
+Only required edit before start:
+- Set `ingest_token` in `[monitoring]`.
+
+`lab_id` is prefilled and does not need changes.
