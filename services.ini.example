@@ -2,6 +2,9 @@
 enabled = 1
 lab_id = YOUR_LAB_ID
 source = neosoft-edge-1-vps
+# Optional machine role selector for shared services.ini deployments.
+# Set via env on each machine: MONITORING_NODE_ROLE=vps or MONITORING_NODE_ROLE=local
+node_role = ENV:MONITORING_NODE_ROLE
 ingest_url = https://api.sdrc.in/api/cto/ingest
 ingest_token = ENV:CTO_INGEST_TOKEN
 interval_seconds = 60
@@ -11,6 +14,8 @@ request_timeout_seconds = 8
 [service:local_fetchreports_health]
 type = http_json
 enabled = 1
+# Optional: run_on = vps | local | both (default both)
+run_on = local
 category = python
 label = Fetchreports Health
 url = http://127.0.0.1:8000/health
@@ -22,6 +27,7 @@ interval_seconds = 60
 [service:labbit_health]
 type = http_json
 enabled = 1
+run_on = vps
 category = app
 label = Labbit Health
 url = https://api.sdrc.in/api/health
