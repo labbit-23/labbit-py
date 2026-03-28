@@ -74,3 +74,20 @@ Only required edit before start:
 - Set `ingest_token` in `[monitoring]`.
 
 `lab_id` is prefilled and does not need changes.
+
+## Deploy Monitoring Node
+
+Use role-specific deploy for monitoring-only machines:
+
+```bash
+# Local monitoring node
+NODE_ROLE=local /opt/labbit-py/scripts/deploy-monitoring-node.sh
+
+# VPS monitoring node
+NODE_ROLE=vps /opt/labbit-py/scripts/deploy-monitoring-node.sh
+```
+
+This script does:
+- `git fetch` + `git pull --ff-only`
+- `pip install -r requirements.txt`
+- PM2 restart/start of the role-specific app in `ecosystem.monitoring.config.cjs`
