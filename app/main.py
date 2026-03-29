@@ -8,6 +8,7 @@ from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.report_status import fetch_report_status, fetch_report_status_by_reqid
 from app.report_fetcher import get_trend_report
+from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
     fetch_requisitions_by_date,
     fetch_delivery_status,
@@ -344,6 +345,49 @@ def delivery_status_update(payload: DeliveryStatusUpdateRequest):
                 "error": str(exc)
             }
         ) from exc
+
+# -----------------------------
+# Trend data (JSON) by MRNO
+# -----------------------------
+@app.get("/trend-data/{mrno}")
+def trend_data(
+    mrno,
+    standardized: Optional[str] = Query(default="1"),
+    include_raw: Optional[str] = Query(default="1"),
+    psyntax_mode: Optional[str] = Query(default="neutral")
+):
+
+    try:
+        payload = fetch_trends_data(
+            mrno,
+            standardized=_is_truthy(standardized),
+            psyntax_mode=str(psyntax_mode or "neutral").strip().lower(),
+        )
+    except TrendsDataError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "trend-data",
+                "mrno": mrno,
+                "error": str(exc)
+            }
+        ) from exc
+
+    if int(payload.get("row_count", 0) or 0) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "endpoint": "trend-data",
+                "mrno": mrno,
+                "error": "No trend data found"
+            }
+        )
+
+    if not _is_truthy(include_raw):
+        payload.pop("data", None)
+
+    return payload
+
 
 # -----------------------------
 # Trend report by MRNO
