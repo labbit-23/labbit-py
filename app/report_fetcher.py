@@ -3,6 +3,8 @@ import urllib.parse
 import configparser
 import os
 import time
+import hashlib
+import shutil
 from pathlib import Path
 from app.pdf_utils import validate_pdf, merge_pdfs
 
@@ -25,6 +27,11 @@ VERSION = config["defaults"]["version"]
 CLIENTTYPE = config["defaults"]["clienttype"]
 
 OUTPUT_DIR = config["paths"]["reports"]
+COMBINED_CACHE_DIR = os.path.join(OUTPUT_DIR, "_combined_cache")
+
+REPORT_REUSE_WINDOW_SECONDS = int(os.environ.get("REPORT_REUSE_WINDOW_SECONDS", "60"))
+REPORT_LOCK_WAIT_SECONDS = int(os.environ.get("REPORT_LOCK_WAIT_SECONDS", "15"))
+REPORT_LOCK_POLL_SECONDS = float(os.environ.get("REPORT_LOCK_POLL_SECONDS", "0.2"))
 
 SESSION_TIMEOUT = 1800  # 30 minutes
 
@@ -43,6 +50,57 @@ def first_pair(text):
 def ensure_output_dir():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
+    if not os.path.exists(COMBINED_CACHE_DIR):
+        os.makedirs(COMBINED_CACHE_DIR)
+
+
+def _build_combined_cache_path(reqid, include_header=True, apply_radiology_background=True, printtype="1", reqno=None):
+    key = "|".join(
+        [
+            str(reqid or "").strip(),
+            str(reqno or "").strip(),
+            str(printtype or "1").strip(),
+            "H1" if include_header else "H0",
+            "R1" if apply_radiology_background else "R0",
+        ]
+    )
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    safe_reqid = str(reqid or "UNKNOWN").strip() or "UNKNOWN"
+    return os.path.join(COMBINED_CACHE_DIR, f"{safe_reqid}_{digest}.pdf")
+
+
+def _is_recent_file(path, window_seconds):
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        age_seconds = time.time() - os.path.getmtime(path)
+        return age_seconds >= 0 and age_seconds <= max(0, window_seconds)
+    except Exception:
+        return False
+
+
+def _acquire_key_lock(lock_path, wait_seconds, poll_seconds):
+    deadline = time.time() + max(0, wait_seconds)
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            return fd
+        except FileExistsError:
+            if time.time() >= deadline:
+                raise TimeoutError(f"Timed out waiting for report lock: {lock_path}")
+            time.sleep(max(0.05, poll_seconds))
+
+
+def _release_key_lock(fd, lock_path):
+    try:
+        os.close(fd)
+    except Exception:
+        pass
+    try:
+        if os.path.exists(lock_path):
+            os.unlink(lock_path)
+    except Exception:
+        pass
 
 
 # -----------------------------
@@ -261,47 +319,78 @@ def get_trend_report(mrno):
     return path
 
 def get_combined_report(reqid, include_header=True, apply_radiology_background=True, printtype="1", reqno=None):
+    ensure_output_dir()
+    cache_path = _build_combined_cache_path(
+        reqid=reqid,
+        include_header=include_header,
+        apply_radiology_background=apply_radiology_background,
+        printtype=printtype,
+        reqno=reqno
+    )
 
-    files = []
+    if _is_recent_file(cache_path, REPORT_REUSE_WINDOW_SECONDS):
+        return cache_path
 
-    # -----------------------------
-    # 1. Lab report
-    # -----------------------------
+    lock_path = f"{cache_path}.lock"
+    lock_fd = None
     try:
-        lab_path = get_report(reqid, include_header=include_header, printtype=printtype, reqno=reqno)
-        files.append(lab_path)
-    except Exception as e:
-        print("Lab not available:", e)
+        lock_fd = _acquire_key_lock(
+            lock_path=lock_path,
+            wait_seconds=REPORT_LOCK_WAIT_SECONDS,
+            poll_seconds=REPORT_LOCK_POLL_SECONDS
+        )
+    except TimeoutError:
+        # Do not fail report delivery if lock contention is high.
+        # Continue without a lock (worst case: duplicate generation once).
+        lock_fd = None
 
-    # -----------------------------
-    # 2. Radiology report
-    # -----------------------------
     try:
-        from app.radiology_fetcher import get_radiology_report
+        # Double-check after acquiring lock in case another request already generated it.
+        if _is_recent_file(cache_path, REPORT_REUSE_WINDOW_SECONDS):
+            return cache_path
 
-        rad_path = get_radiology_report(reqid, apply_background_overlay=apply_radiology_background)
-        files.append(rad_path)
-    except Exception as e:
-        print("Radiology not available:", e)
+        files = []
 
-    # -----------------------------
-    # 3. Nothing found
-    # -----------------------------
-    if not files:
-        raise Exception("No reports available")
+        # -----------------------------
+        # 1. Lab report
+        # -----------------------------
+        try:
+            lab_path = get_report(reqid, include_header=include_header, printtype=printtype, reqno=reqno)
+            files.append(lab_path)
+        except Exception as e:
+            print("Lab not available:", e)
 
-    # -----------------------------
-    # 4. Only one → return
-    # -----------------------------
-    if len(files) == 1:
-        return files[0]
+        # -----------------------------
+        # 2. Radiology report
+        # -----------------------------
+        try:
+            from app.radiology_fetcher import get_radiology_report
 
-    # -----------------------------
-    # 5. Merge both
-    # -----------------------------
-    output_path = os.path.join(OUTPUT_DIR, f"{reqid}_COMBINED.pdf")
+            rad_path = get_radiology_report(reqid, apply_background_overlay=apply_radiology_background)
+            files.append(rad_path)
+        except Exception as e:
+            print("Radiology not available:", e)
 
-    return merge_pdfs(files, output_path)
+        # -----------------------------
+        # 3. Nothing found
+        # -----------------------------
+        if not files:
+            raise Exception("No reports available")
+
+        # -----------------------------
+        # 4. Only one → persist copy and return
+        # -----------------------------
+        if len(files) == 1:
+            shutil.copyfile(files[0], cache_path)
+            return cache_path
+
+        # -----------------------------
+        # 5. Merge both into cached artifact
+        # -----------------------------
+        return merge_pdfs(files, cache_path)
+    finally:
+        if lock_fd is not None:
+            _release_key_lock(lock_fd, lock_path)
 
 # -----------------------------
 # Public function
