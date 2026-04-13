@@ -289,16 +289,22 @@ def report_status_reqid(reqid):
 # Delivery requisitions
 # -----------------------------
 @app.get("/delivery/requisitions-by-date/{date}")
-def delivery_requisitions_by_date(date):
+def delivery_requisitions_by_date(
+    date,
+    org_id: str = Query(default=""),
+    org_ids: str = Query(default="")
+):
 
     try:
-        return fetch_requisitions_by_date(date)
+        return fetch_requisitions_by_date(date, org_id=org_id, org_ids=org_ids)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail={
                 "endpoint": "delivery/requisitions-by-date",
                 "date": date,
+                "org_id": org_id,
+                "org_ids": org_ids,
                 "error": str(exc)
             }
         ) from exc

@@ -82,6 +82,49 @@ def _stringify_number(value):
     return str(value).strip()
 
 
+def _parse_org_filters(org_id=None, org_ids=None):
+    values = []
+    if org_id is not None:
+        text = str(org_id).strip()
+        if text:
+            values.append(text)
+    if org_ids is not None:
+        text = str(org_ids).strip()
+        if text:
+            values.extend([part.strip() for part in text.split(",") if str(part).strip()])
+    return set(values)
+
+
+def _extract_org_from_row(row):
+    if not isinstance(row, dict):
+        return ""
+    candidates = [
+        "REFDOCTOR",
+        "REF_DOCTOR",
+        "refdoctor",
+        "ref_doctor",
+        "ORG_ID",
+        "ORGID",
+        "ORGANIZATION_ID",
+        "ORGANISATION_ID",
+        "CLIENT_ID",
+        "ACCOUNT_ID",
+        "org_id",
+        "orgid",
+        "organization_id",
+        "organisation_id",
+        "client_id",
+        "account_id",
+    ]
+    for key in candidates:
+        value = row.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
 def _encode_delivery_update(reqno, status, channel, message):
     channel_name = str(channel).strip().upper()
     message_text = str(message).strip().upper()
@@ -132,21 +175,27 @@ def _decode_delivery_row(reqno, row):
     return decoded
 
 
-def fetch_requisitions_by_date(date):
+def fetch_requisitions_by_date(date, org_id=None, org_ids=None):
     rows = _unwrap_rows(_call_tapi_query(GET_REQ_API, {"reqdate": date}))
 
     if not isinstance(rows, list):
         raise Exception(f"Unexpected requisitions response: {rows}")
 
     requisitions = []
+    allowed_orgs = _parse_org_filters(org_id=org_id, org_ids=org_ids)
 
     for row in rows:
+        row_org_id = _extract_org_from_row(row)
+        if allowed_orgs and (not row_org_id or row_org_id not in allowed_orgs):
+            continue
         requisitions.append({
             "reqno": row.get("REQNO", row.get("reqno")),
             "reqid": row.get("REQID", row.get("reqid")),
             "mrno": row.get("MRNO", row.get("mrno")),
             "patient_name": row.get("PATIENTNM", row.get("patient_name")),
-            "phoneno": row.get("PHONENO", row.get("phoneno", row.get("MOBILENO", row.get("mobileno"))))
+            "phoneno": row.get("PHONENO", row.get("phoneno", row.get("MOBILENO", row.get("mobileno")))),
+            "org_id": row_org_id or None,
+            "org_name": row.get("DRNAME", row.get("drname")),
         })
 
     return {
