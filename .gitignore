@@ -24,3 +24,4 @@ reports/
 !.env.example
 config.ini
 services.ini
+.env*
