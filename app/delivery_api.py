@@ -11,6 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 config.read(ROOT_DIR / "config.ini")
 
 GET_REQ_API = config["api"]["getrequisitionsbydateapi"]
+GET_REQ_BY_ORG_API = config["api"].get("getrequisitionsbyorgidapi", "").strip()
 UPDATE_STATUS_API = config["api"]["updatedeliverystatusapi"]
 GET_DELIVERY_STATUS_API = config["api"]["getdeliverystatusapi"]
 
@@ -80,19 +81,6 @@ def _stringify_number(value):
         return ""
 
     return str(value).strip()
-
-
-def _parse_org_filters(org_id=None, org_ids=None):
-    values = []
-    if org_id is not None:
-        text = str(org_id).strip()
-        if text:
-            values.append(text)
-    if org_ids is not None:
-        text = str(org_ids).strip()
-        if text:
-            values.extend([part.strip() for part in text.split(",") if str(part).strip()])
-    return set(values)
 
 
 def _extract_org_from_row(row):
@@ -176,17 +164,27 @@ def _decode_delivery_row(reqno, row):
 
 
 def fetch_requisitions_by_date(date, org_id=None, org_ids=None):
-    rows = _unwrap_rows(_call_tapi_query(GET_REQ_API, {"reqdate": date}))
+    resolved_org_id = str(org_id or "").strip()
+    use_org_api = bool(resolved_org_id)
+    api_url = GET_REQ_BY_ORG_API if use_org_api else GET_REQ_API
+
+    if use_org_api and not api_url:
+        raise Exception("getrequisitionsbyorgidapi is not configured in config.ini [api]")
+
+    payload = {"reqdate": date}
+    if use_org_api:
+        payload["orgid"] = resolved_org_id
+
+    rows = _unwrap_rows(_call_tapi_query(api_url, payload))
 
     if not isinstance(rows, list):
         raise Exception(f"Unexpected requisitions response: {rows}")
 
     requisitions = []
-    allowed_orgs = _parse_org_filters(org_id=org_id, org_ids=org_ids)
 
     for row in rows:
         row_org_id = _extract_org_from_row(row)
-        if allowed_orgs and (not row_org_id or row_org_id not in allowed_orgs):
+        if resolved_org_id and row_org_id != resolved_org_id:
             continue
         requisitions.append({
             "reqno": row.get("REQNO", row.get("reqno")),
