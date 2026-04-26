@@ -124,8 +124,6 @@ def fetch_demographics_by_mrno(mrno):
 
     return {
         "mrno": _row_value(row, "MRNO", "mrno", "CREGNO", "cregno") or clean_mrno,
-        "reqno": _row_value(row, "REQNO", "reqno"),
-        "reqid": _row_value(row, "REQID", "reqid"),
         "patient_name": _row_value(
             row,
             "PATIENTNM",
@@ -173,17 +171,11 @@ def update_demographics(payload):
     if not isinstance(payload, dict):
         raise Exception("payload must be an object")
 
-    identifiers = [
-        str(payload.get("reqno") or "").strip(),
-        str(payload.get("reqid") or "").strip(),
-        str(payload.get("mrno") or "").strip(),
-    ]
-    if not any(identifiers):
-        raise Exception("at least one identifier is required (reqno/reqid/mrno)")
+    mrno = str(payload.get("mrno") or "").strip()
+    if not mrno:
+        raise Exception("mrno is required")
 
     allowed_keys = [
-        "reqno",
-        "reqid",
         "mrno",
         "patient_name",
         "mobile_no",
