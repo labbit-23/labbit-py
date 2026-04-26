@@ -14,6 +14,11 @@ from app.delivery_api import (
     fetch_delivery_status,
     fetch_update_delivery_status,
 )
+from app.shivam_tools import (
+    fetch_demographics_by_mrno,
+    update_demographics,
+    fetch_pricelist,
+)
 import logging
 import os
 import configparser
@@ -46,6 +51,17 @@ class DeliveryStatusUpdateRequest(BaseModel):
     status: str
     channel: str
     message: str
+
+
+class ShivamDemographicsUpdateRequest(BaseModel):
+    reqno: Optional[str] = None
+    reqid: Optional[str] = None
+    mrno: Optional[str] = None
+    patient_name: Optional[str] = None
+    mobile_no: Optional[str] = None
+    age: Optional[int] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
 
 
 def _is_truthy(value):
@@ -408,6 +424,68 @@ def trend_report(mrno):
         media_type="application/pdf",
         filename=f"trend_{mrno}.pdf"
     )
+
+
+# -----------------------------
+# Shivam tools: demographics and pricelist
+# -----------------------------
+@app.get("/shivam/demographics/{mrno}")
+def shivam_demographics(mrno):
+    try:
+        return fetch_demographics_by_mrno(mrno)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "shivam/demographics",
+                "mrno": mrno,
+                "error": str(exc)
+            }
+        ) from exc
+
+
+@app.post("/shivam/demographics")
+def shivam_demographics_update(payload: ShivamDemographicsUpdateRequest):
+    try:
+        return update_demographics(payload.model_dump(exclude_none=True))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "shivam/demographics",
+                "error": str(exc)
+            }
+        ) from exc
+
+
+@app.put("/shivam/demographics")
+def shivam_demographics_update_put(payload: ShivamDemographicsUpdateRequest):
+    try:
+        return update_demographics(payload.model_dump(exclude_none=True))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "shivam/demographics",
+                "error": str(exc)
+            }
+        ) from exc
+
+
+@app.get("/shivam/pricelist")
+def shivam_pricelist(lab_id: str = Query(default="")):
+    try:
+        clean_lab_id = str(lab_id or "").strip()
+        return fetch_pricelist(clean_lab_id if clean_lab_id else None)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "shivam/pricelist",
+                "lab_id": str(lab_id or "").strip(),
+                "error": str(exc)
+            }
+        ) from exc
 # -----------------------------
 # Simple Web UI
 # -----------------------------

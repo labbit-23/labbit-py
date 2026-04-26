@@ -12,6 +12,9 @@ reportstatusreqidapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf
 getrequisitionsbydateapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf271&terminalid=YOUR_TERMINAL_ID
 updatedeliverystatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf272&terminalid=YOUR_TERMINAL_ID
 getdeliverystatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf273&terminalid=YOUR_TERMINAL_ID
+getdemographicsbymrnoapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfXXX&terminalid=YOUR_TERMINAL_ID
+updatedemographicsapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfYYY&terminalid=YOUR_TERMINAL_ID
+getpricelistapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfZZZ&terminalid=YOUR_TERMINAL_ID
 
 [login]
 username = admin
