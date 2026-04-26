@@ -87,6 +87,18 @@ def _parse_int(value):
         return None
 
 
+def _normalize_dob(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    # Accept "YYYY-MM-DD..." and normalize to YYYY-MM-DD for Shivam SQL TO_DATE.
+    if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+        return text[:10]
+    return text
+
+
 def _normalize_sex_to_ui(value):
     sex_num = _parse_int(value)
     if sex_num is None:
@@ -111,6 +123,39 @@ def _normalize_sex_for_shivam(payload):
     if raw_gender in {"female", "f", "0"}:
         return 0
     return None
+
+
+def _response_signals_failure(value):
+    if value is None:
+        return False
+    if isinstance(value, list):
+        return any(_response_signals_failure(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+
+    lowered = {str(k).lower(): v for k, v in value.items()}
+
+    status = lowered.get("status")
+    if status is not None and str(status).strip().lower() in {"false", "fail", "failed", "error", "0"}:
+        return True
+    ok = lowered.get("ok")
+    if ok is not None and str(ok).strip().lower() in {"false", "0"}:
+        return True
+    success = lowered.get("success")
+    if success is not None and str(success).strip().lower() in {"false", "0"}:
+        return True
+
+    for key in ("error", "errmsg", "message", "detail"):
+        val = lowered.get(key)
+        if val is None:
+            continue
+        text = str(val).strip().lower()
+        if text in {"", "ok", "success", "updated"}:
+            continue
+        if any(flag in text for flag in ("error", "fail", "invalid", "denied", "not found", "unable")):
+            return True
+
+    return False
 
 
 def fetch_demographics_by_mrno(mrno):
@@ -210,7 +255,9 @@ def update_demographics(payload):
     if normalized_sex is not None:
         clean_payload["SEX"] = normalized_sex
     if "dob" in clean_payload and "DOB" not in clean_payload:
-        clean_payload["DOB"] = clean_payload["dob"]
+        normalized_dob = _normalize_dob(clean_payload["dob"])
+        clean_payload["dob"] = normalized_dob
+        clean_payload["DOB"] = normalized_dob
     if "age" in clean_payload and "AGE" not in clean_payload:
         clean_payload["AGE"] = clean_payload["age"]
     if "email" in clean_payload and "EMAIL" not in clean_payload:
@@ -243,6 +290,8 @@ def update_demographics(payload):
         raise Exception("no update fields provided")
 
     rows = _unwrap_rows(_call_tapi_query(UPDATE_DEMOGRAPHICS_API, clean_payload))
+    if _response_signals_failure(rows):
+        raise Exception(f"Shivam demographics update failed: {rows}")
     return {
         "ok": True,
         "payload": clean_payload,
@@ -255,9 +304,10 @@ def fetch_pricelist(lab_id=None):
     if lab_id is not None and str(lab_id).strip():
         payload["lab_id"] = str(lab_id).strip()
 
-    rows = _unwrap_rows(_call_tapi_query(GET_PRICELIST_API, payload))
+    raw = _call_tapi_query(GET_PRICELIST_API, payload)
+    rows = _unwrap_rows(raw)
     if not isinstance(rows, list):
-        raise Exception(f"Unexpected pricelist response: {rows}")
+        raise Exception(f"Unexpected pricelist response: {raw}")
 
     return {
         "tests": rows

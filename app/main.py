@@ -62,6 +62,12 @@ class ShivamDemographicsUpdateRequest(BaseModel):
     age: Optional[int] = None
     dob: Optional[str] = None
     gender: Optional[str] = None
+    sex: Optional[int] = None
+    email: Optional[str] = None
+    pincode: Optional[str] = None
+    ageyrs: Optional[int] = None
+    agemonths: Optional[int] = None
+    agedays: Optional[int] = None
 
 
 def _is_truthy(value):
