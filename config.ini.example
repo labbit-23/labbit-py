@@ -15,6 +15,7 @@ getdeliverystatusapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf
 getdemographicsbymrnoapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfXXX&terminalid=YOUR_TERMINAL_ID
 updatedemographicsapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfYYY&terminalid=YOUR_TERMINAL_ID
 getpricelistapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wfZZZ&terminalid=YOUR_TERMINAL_ID
+getdepartmentlistapi = http://120.138.8.37:7777//clouduat/TApiQuery?webformid=wf282&terminalid=YOUR_TERMINAL_ID
 
 [login]
 username = admin
@@ -39,3 +40,22 @@ whatsapp_api_key = CHANGE_ME_OR_USE_ENV
 default_phone =
 fallback_phone =
 whatsapp_endpoint =
+
+[departments]
+dopplers = DPT00055
+haematology = DPT00002
+microbiology_serology = DPT00003
+clinical_pathology = DPT00004
+radiology = DPT00006
+cyto_histopathology = DPT00013
+general = DPT00032
+special_tests = DPT00033
+biochemistry = DPT00035
+sonology = DPT00038
+cardiology = DPT00049
+ct_scan = DPT00050
+hormones = DPT00052
+bmd = DPT00053
+infusions = DEP00056
+physiotherapy = DEP00057
+

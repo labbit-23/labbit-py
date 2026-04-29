@@ -19,6 +19,7 @@ from app.shivam_tools import (
     update_demographics,
     fetch_pricelist,
 )
+from app.department_worklist_api import fetch_department_worklist
 import logging
 import os
 import configparser
@@ -68,6 +69,14 @@ class ShivamDemographicsUpdateRequest(BaseModel):
     ageyrs: Optional[int] = None
     agemonths: Optional[int] = None
     agedays: Optional[int] = None
+
+
+class DepartmentWorklistRequest(BaseModel):
+    fromreqdate: Optional[str] = None
+    toreqdate: Optional[str] = None
+    department: Optional[str] = None
+    department_name: Optional[str] = None
+
 
 
 def _is_truthy(value):
@@ -329,6 +338,65 @@ def delivery_requisitions_by_date(
                 "org_ids": org_ids,
                 "error": str(exc)
             }
+        ) from exc
+
+
+# -----------------------------
+# Department worklist
+# -----------------------------
+@app.get("/delivery/department-worklist")
+def delivery_department_worklist(
+    fromreqdate: Optional[str] = Query(default=None),
+    toreqdate: Optional[str] = Query(default=None),
+    department: Optional[str] = Query(default=None),
+    department_name: Optional[str] = Query(default=None),
+):
+
+    try:
+        return fetch_department_worklist(
+            fromreqdate=fromreqdate,
+            toreqdate=toreqdate,
+            department=department,
+            department_name=department_name,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "delivery/department-worklist",
+                "fromreqdate": str(fromreqdate or "").strip() or None,
+                "toreqdate": str(toreqdate or "").strip() or None,
+                "department": str(department or "").strip() or None,
+                "department_name": str(department_name or "").strip() or None,
+                "error": str(exc),
+            },
+        ) from exc
+
+
+@app.post("/delivery/department-worklist")
+def delivery_department_worklist_post(filters: list[DepartmentWorklistRequest]):
+    try:
+        if not isinstance(filters, list) or len(filters) == 0:
+            raise Exception("filters array is required")
+
+        rows = []
+        for entry in filters:
+            result = fetch_department_worklist(
+                fromreqdate=entry.fromreqdate,
+                toreqdate=entry.toreqdate,
+                department=entry.department,
+                department_name=entry.department_name,
+            )
+            rows.append(result)
+
+        return {"count": len(rows), "results": rows}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "delivery/department-worklist",
+                "error": str(exc),
+            },
         ) from exc
 
 
