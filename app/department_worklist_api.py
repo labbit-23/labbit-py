@@ -136,6 +136,7 @@ def _to_item(row):
         "groupnm": _row_value(row, "GROUPNM", "groupnm") or None,
         "cancelled_flg": _row_value(row, "CANCELLED_FLG", "cancelled_flg", "CANCELLED", "cancelled") or None,
         "approved_flg": _row_value(row, "APPROVED_FLG", "approved_flg", "APPROVEDFLG", "approvedflg") or None,
+        "performed": _row_value(row, "PERFORMED", "performed") or None,
         "raw": row,
     }
 
