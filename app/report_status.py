@@ -2,6 +2,7 @@ import requests
 import json
 import configparser
 from pathlib import Path
+from datetime import datetime
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -51,6 +52,43 @@ def normalize_phone(value):
     return digits[-10:]
 
 
+def _normalize_cloud_datetime(value):
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    # Cloud payloads commonly include trailing ".0".
+    if text.endswith(".0"):
+        text = text[:-2]
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
+def _derive_approved_at(row):
+
+    approved_dt_raw = row_value(row, "APPROVEDDT", "approveddt", "APPROVED_DATE", "approved_date")
+    approved_tm_raw = row_value(row, "APPROVEDTM", "approvedtm", "APPROVED_TIME", "approved_time")
+
+    dt_from_dt = _normalize_cloud_datetime(approved_dt_raw)
+    dt_from_tm = _normalize_cloud_datetime(approved_tm_raw)
+
+    # Some payloads send APPROVEDTM as a full datetime, not just a time.
+    if dt_from_tm and len(str(approved_tm_raw or "").strip()) >= 10:
+        return dt_from_tm
+
+    if dt_from_dt and dt_from_tm:
+        return datetime.combine(dt_from_dt.date(), dt_from_tm.time())
+
+    return dt_from_dt or dt_from_tm
+
+
 # -----------------------------
 # NEW: Common processor (NON-BREAKING)
 # -----------------------------
@@ -63,12 +101,28 @@ def _process_status_rows(rows, identifier):
     lab_ready = 0
     radiology_total = 0
     radiology_ready = 0
+    latest_approved_at = None
+    first_approved_at = None
+    normalized_rows = []
 
     for row in rows:
+        row_out = dict(row) if isinstance(row, dict) else row
 
         group_id = row_value(row, "GROUPID", "groupid")
         report_status = row_value(row, "REPORT_STATUS", "report_status")
         approved_flag = row_value(row, "APPROVEDFLG", "approvedflg")
+        approved_at_dt = _derive_approved_at(row)
+        approved_at = approved_at_dt.isoformat() if approved_at_dt else None
+        if isinstance(row_out, dict):
+            row_out["approved_at"] = approved_at
+            row_out["APPROVED_AT"] = approved_at
+        normalized_rows.append(row_out)
+
+        if approved_at_dt:
+            if first_approved_at is None or approved_at_dt < first_approved_at:
+                first_approved_at = approved_at_dt
+            if latest_approved_at is None or approved_at_dt > latest_approved_at:
+                latest_approved_at = approved_at_dt
 
         if group_id == "GDEP0001":
             lab_total += 1
@@ -112,7 +166,9 @@ def _process_status_rows(rows, identifier):
         "patient_phone": normalize_phone(raw_phone),
         "phoneno": raw_phone,
         "test_date": test_date,
-        "tests": rows
+        "first_approved_at": first_approved_at.isoformat() if first_approved_at else None,
+        "latest_approved_at": latest_approved_at.isoformat() if latest_approved_at else None,
+        "tests": normalized_rows
     }
 
 
