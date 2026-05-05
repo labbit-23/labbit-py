@@ -390,6 +390,18 @@ def fetch_outsourced_report(reqid, testid, source_url=None, qr_url=None):
                 "debug": debug,
             }
 
+        # Intentional policy: use existing attached PDF directly for dispatch.
+        # Keep QR decode/fetch code in-place for possible future reuse, but bypass it now.
+        payload = _build_base_letterhead_payload(
+            base,
+            status="resolved_base_configured",
+            reason="QR-based outsourced resolution disabled; using attached base PDF directly",
+        )
+        payload["outsourced_mode"] = "attached_base"
+        payload["qr_candidates"] = []
+        payload["debug"] = debug
+        return payload
+
         if not _fetchreport_fromqr_enabled():
             payload = _build_base_letterhead_payload(
                 base,
