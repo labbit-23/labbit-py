@@ -23,6 +23,7 @@ from app.department_worklist_api import fetch_department_worklist
 from app.attachment_fetcher import fetch_attachment
 from app.outsourced_report_fetcher import fetch_outsourced_report, classify_outsourced_report
 from app.dispatch_context import build_dispatch_context
+from app.pdf_utils import apply_background
 import logging
 import os
 import configparser
@@ -34,6 +35,7 @@ config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]
 config.read(ROOT_DIR / "config.ini")
 
+BG_PATH = str(ROOT_DIR / "assets" / "background.pdf")
 LOG_DIR = config["paths"]["logs"]
 
 if not os.path.exists(LOG_DIR):
@@ -192,6 +194,27 @@ def _is_truthy(value):
         return False
     text = str(value).strip().lower()
     return text in {"1", "true", "yes", "y", "on"}
+
+
+def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
+    if not os.path.exists(bg_pdf_path):
+        raise Exception("Background not found: " + bg_pdf_path)
+
+    reader = PdfReader(input_pdf)
+    bg_reader = PdfReader(bg_pdf_path)
+    writer = PdfWriter()
+
+    bg_page = bg_reader.pages[0]
+
+    for idx, page in enumerate(reader.pages):
+        if idx == 0:
+            page.merge_page(bg_page)
+        writer.add_page(page)
+
+    with open(output_pdf, "wb") as handle:
+        writer.write(handle)
+
+    return output_pdf
 
 
 def _resolve_plain_mode(header_mode=None, without_header_background=None, chkrephead=None):
@@ -861,7 +884,10 @@ def outsourced_report(
     testid: str = Query(...),
     source_url: Optional[str] = Query(default=None),
     qr_url: Optional[str] = Query(default=None),
-    fallback_to_base: Optional[str] = Query(default="false")
+    fallback_to_base: Optional[str] = Query(default="false"),
+    chkrephead: Optional[str] = Query(default=None),
+    header_mode: str = Query(default="default"),
+    without_header_background: Optional[str] = Query(default=None)
 ):
     try:
         _require_dispatch_allowed(reqid=reqid)
@@ -872,21 +898,48 @@ def outsourced_report(
             qr_url=qr_url,
         )
 
+        plain = _resolve_plain_mode(
+            header_mode=header_mode,
+            without_header_background=without_header_background,
+            chkrephead=chkrephead,
+        )
+
         letterhead = payload.get("letterhead") if isinstance(payload, dict) else None
         if letterhead and letterhead.get("path"):
+            selected_path = str(letterhead.get("path"))
+            selected_filename = str(letterhead.get("filename") or "outsourced_letterhead.pdf")
+            outsourced_mode = str(payload.get("outsourced_mode") or "").strip().lower()
+
+            if (not plain) and outsourced_mode == "attached_base":
+                os.makedirs(str(ROOT_DIR / "reports" / "outsourced"), exist_ok=True)
+                rendered = str((ROOT_DIR / "reports" / "outsourced" / f"WithHeader_{reqid}{testid}.pdf"))
+                _apply_background_first_page(selected_path, rendered, BG_PATH)
+                selected_path = rendered
+                selected_filename = f"WithHeader_{reqid}{testid}.pdf"
+
             return FileResponse(
-                str(letterhead.get("path")),
+                selected_path,
                 media_type="application/pdf",
-                filename=str(letterhead.get("filename") or "outsourced_letterhead.pdf"),
+                filename=selected_filename,
             )
 
         allow_base = _is_truthy(fallback_to_base)
         base = payload.get("base") if isinstance(payload, dict) else None
         if allow_base and isinstance(base, dict) and base.get("path"):
+            selected_path = str(base.get("path"))
+            selected_filename = str(base.get("filename") or "outsourced_base.pdf")
+
+            if not plain:
+                os.makedirs(str(ROOT_DIR / "reports" / "outsourced"), exist_ok=True)
+                rendered = str((ROOT_DIR / "reports" / "outsourced" / f"WithHeader_{reqid}{testid}.pdf"))
+                _apply_background_first_page(selected_path, rendered, BG_PATH)
+                selected_path = rendered
+                selected_filename = f"WithHeader_{reqid}{testid}.pdf"
+
             return FileResponse(
-                str(base.get("path")),
+                selected_path,
                 media_type="application/pdf",
-                filename=str(base.get("filename") or "outsourced_base.pdf"),
+                filename=selected_filename,
             )
 
         raise HTTPException(status_code=404, detail={

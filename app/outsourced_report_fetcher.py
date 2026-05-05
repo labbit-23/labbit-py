@@ -1,5 +1,6 @@
 import os
 import re
+import configparser
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -11,7 +12,13 @@ from app.attachment_fetcher import fetch_attachment
 from app.report_status import fetch_report_status_by_reqid
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+config = configparser.ConfigParser()
+config.read(ROOT_DIR / "config.ini")
 OUTSOURCED_DIR = os.path.join(report_fetcher.OUTPUT_DIR, "outsourced")
+
+def _fetchreport_fromqr_enabled():
+    raw = str(config.get("outsourced", "fetchreport_fromqr", fallback="1") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 URL_PATTERN = re.compile(r"https?://[^\s)>'\"]+", re.IGNORECASE)
 
@@ -382,6 +389,17 @@ def fetch_outsourced_report(reqid, testid, source_url=None, qr_url=None):
                 "qr_candidates": [],
                 "debug": debug,
             }
+
+        if not _fetchreport_fromqr_enabled():
+            payload = _build_base_letterhead_payload(
+                base,
+                status="resolved_base_configured",
+                reason="QR fetch disabled by config (outsourced.fetchreport_fromqr=0)",
+            )
+            payload["outsourced_mode"] = "attached_base"
+            payload["qr_candidates"] = []
+            payload["debug"] = debug
+            return payload
 
         explicit_qr = _normalize_candidate_url(qr_url)
         candidates = [explicit_qr] if explicit_qr else []

@@ -79,13 +79,14 @@ def _derive_approved_at(row):
     dt_from_dt = _normalize_cloud_datetime(approved_dt_raw)
     dt_from_tm = _normalize_cloud_datetime(approved_tm_raw)
 
-    # Some payloads send APPROVEDTM as a full datetime, not just a time.
-    if dt_from_tm and len(str(approved_tm_raw or "").strip()) >= 10:
-        return dt_from_tm
-
+    # Primary rule:
+    # APPROVEDDT is the date source, APPROVEDTM is the time source.
+    # Even if APPROVEDTM is supplied as a full datetime, we should still
+    # anchor to APPROVEDDT's date to avoid wrong carry-over dates.
     if dt_from_dt and dt_from_tm:
         return datetime.combine(dt_from_dt.date(), dt_from_tm.time())
 
+    # Fallbacks when one side is missing.
     return dt_from_dt or dt_from_tm
 
 

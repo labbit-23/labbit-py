@@ -64,3 +64,9 @@ physiotherapy = DEP00057
 [dispatch_policy]
 # Comma-separated SOURCEID values for which report dispatch/download should be denied
 do_not_send_source_ids =
+
+
+[outsourced]
+# 1 => extract QR from attached PDF and fetch external letterhead
+# 0 => skip QR fetch and use attached PDF directly
+fetchreport_fromqr = 1
