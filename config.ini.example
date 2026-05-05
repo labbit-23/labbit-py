@@ -59,3 +59,8 @@ bmd = DPT00053
 infusions = DEP00056
 physiotherapy = DEP00057
 
+
+
+[dispatch_policy]
+# Comma-separated SOURCEID values for which report dispatch/download should be denied
+do_not_send_source_ids =

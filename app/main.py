@@ -20,6 +20,9 @@ from app.shivam_tools import (
     fetch_pricelist,
 )
 from app.department_worklist_api import fetch_department_worklist
+from app.attachment_fetcher import fetch_attachment
+from app.outsourced_report_fetcher import fetch_outsourced_report, classify_outsourced_report
+from app.dispatch_context import build_dispatch_context
 import logging
 import os
 import configparser
@@ -78,6 +81,111 @@ class DepartmentWorklistRequest(BaseModel):
     department_name: Optional[str] = None
 
 
+
+
+
+def _read_do_not_send_source_ids():
+    values = set()
+
+    env_raw = str(os.getenv("DO_NOT_SEND_SOURCE_IDS", "")).strip()
+    if env_raw:
+        for part in env_raw.split(","):
+            token = str(part or "").strip()
+            if token:
+                values.add(token)
+
+    if config.has_section("dispatch_policy"):
+        cfg_raw = str(config.get("dispatch_policy", "do_not_send_source_ids", fallback="") or "").strip()
+        if cfg_raw:
+            for part in cfg_raw.split(","):
+                token = str(part or "").strip()
+                if token:
+                    values.add(token)
+
+    return values
+
+
+def _first_non_empty_source_value(status_data, *keys):
+    if not isinstance(status_data, dict):
+        return None
+
+    for key in keys:
+        val = status_data.get(key)
+        text = str(val or "").strip()
+        if text:
+            return text
+
+    tests = status_data.get("tests")
+    if not isinstance(tests, list):
+        return None
+
+    wanted = {str(k).strip().lower() for k in keys}
+    for row in tests:
+        if not isinstance(row, dict):
+            continue
+        lowered = {str(k).strip().lower(): v for k, v in row.items()}
+        for key in wanted:
+            val = lowered.get(key)
+            text = str(val or "").strip()
+            if text:
+                return text
+
+    return None
+
+
+def _build_deny_payload(status_data):
+    source_id = _first_non_empty_source_value(status_data, "source_id", "SOURCE_ID", "sourceid", "SOURCEID", "refdoctor", "REFDOCTOR")
+    source_name = _first_non_empty_source_value(status_data, "source_name", "SOURCE_NAME", "sourcenm", "SOURCENM", "drname", "DRNAME")
+
+    if source_id and source_id in DO_NOT_SEND_SOURCE_IDS:
+        return {
+            "dispatch_allowed": False,
+            "code": "SOURCE_CONFIDENTIAL_DO_NOT_SEND",
+            "reason": "source_confidential_do_not_send",
+            "source_id": source_id,
+            "source_name": source_name,
+        }
+
+    return {
+        "dispatch_allowed": True,
+        "code": None,
+        "reason": None,
+        "source_id": source_id,
+        "source_name": source_name,
+    }
+
+
+def _require_dispatch_allowed(*, reqid=None, reqno=None, status_data=None):
+    if not DO_NOT_SEND_SOURCE_IDS:
+        return
+
+    data = status_data
+    if not isinstance(data, dict):
+        if reqid:
+            data = fetch_report_status_by_reqid(reqid)
+        elif reqno:
+            data = fetch_report_status(reqno)
+
+    deny = _build_deny_payload(data if isinstance(data, dict) else {})
+    if not deny.get("dispatch_allowed", True):
+        raise HTTPException(status_code=403, detail=deny)
+
+
+def _attach_dispatch_policy(data):
+    if not isinstance(data, dict):
+        return data
+
+    deny = _build_deny_payload(data)
+    out = dict(data)
+    out["dispatch_allowed"] = bool(deny.get("dispatch_allowed", True))
+    out["dispatch_denial_code"] = deny.get("code")
+    out["dispatch_denial_reason"] = deny.get("reason")
+    out["source_id"] = deny.get("source_id")
+    out["source_name"] = deny.get("source_name")
+    return out
+
+
+DO_NOT_SEND_SOURCE_IDS = _read_do_not_send_source_ids()
 
 def _is_truthy(value):
     if value is None:
@@ -176,6 +284,8 @@ def report(
             chkrephead=chkrephead
         )
 
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+
         path = get_report(
             reqid,
             include_header=not plain,
@@ -232,6 +342,8 @@ def combined_report(
         chkrephead=chkrephead
     )
 
+    _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+
     path = get_combined_report(
         reqid,
         include_header=not plain,
@@ -259,6 +371,8 @@ def latest_report(phone):
 
     reqid = rows[0]["reqid"]
 
+    _require_dispatch_allowed(reqid=reqid)
+
     path = get_combined_report(reqid)
 
     return FileResponse(
@@ -280,7 +394,7 @@ def latest_report_meta(phone):
 
     data = fetch_report_status_by_reqid(reqid)
 
-    return data
+    return _attach_dispatch_policy(data)
 
 
 
@@ -302,7 +416,7 @@ def report_status(reqno):
 
     data = fetch_report_status(reqno)
 
-    return data
+    return _attach_dispatch_policy(data)
 
 
 # -----------------------------
@@ -313,7 +427,16 @@ def report_status_reqid(reqid):
 
     data = fetch_report_status_by_reqid(reqid)
 
-    return data
+    return _attach_dispatch_policy(data)
+
+
+@app.get("/dispatch-context/{reqno}")
+def dispatch_context(reqno):
+    try:
+        data = build_dispatch_context(reqno)
+        return _attach_dispatch_policy(data)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # -----------------------------
@@ -643,3 +766,136 @@ def ui():
     </body>
     </html>
     """
+
+
+@app.get("/outsourced-attachment/meta")
+def outsourced_attachment_meta(
+    reqid: str = Query(...),
+    testid: str = Query(...),
+    source_url: Optional[str] = Query(default=None)
+):
+    try:
+        _require_dispatch_allowed(reqid=reqid)
+        payload = fetch_attachment(reqid, testid, source_url=source_url, save=True)
+        return {
+            "ok": True,
+            "reqid": reqid,
+            "testid": testid,
+            "filename": payload.get("filename"),
+            "path": payload.get("path"),
+            "source_url": payload.get("url"),
+            "bytes": payload.get("bytes"),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/outsourced-attachment")
+def outsourced_attachment(
+    reqid: str = Query(...),
+    testid: str = Query(...),
+    source_url: Optional[str] = Query(default=None)
+):
+    try:
+        _require_dispatch_allowed(reqid=reqid)
+        payload = fetch_attachment(reqid, testid, source_url=source_url, save=True)
+        filename = str(payload.get("filename") or "outsourced_attachment.pdf")
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise Exception("ATTACHMENT_PATH_MISSING")
+
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=filename
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+
+
+@app.get("/outsourced-report/classify")
+def outsourced_report_classify(
+    reqid: str = Query(...),
+    testid: str = Query(...)
+):
+    try:
+        _require_dispatch_allowed(reqid=reqid)
+        return classify_outsourced_report(reqid=reqid, testid=testid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/outsourced-report/meta")
+def outsourced_report_meta(
+    reqid: str = Query(...),
+    testid: str = Query(...),
+    source_url: Optional[str] = Query(default=None),
+    qr_url: Optional[str] = Query(default=None)
+):
+    try:
+        _require_dispatch_allowed(reqid=reqid)
+        payload = fetch_outsourced_report(
+            reqid=reqid,
+            testid=testid,
+            source_url=source_url,
+            qr_url=qr_url,
+        )
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/outsourced-report")
+def outsourced_report(
+    reqid: str = Query(...),
+    testid: str = Query(...),
+    source_url: Optional[str] = Query(default=None),
+    qr_url: Optional[str] = Query(default=None),
+    fallback_to_base: Optional[str] = Query(default="false")
+):
+    try:
+        _require_dispatch_allowed(reqid=reqid)
+        payload = fetch_outsourced_report(
+            reqid=reqid,
+            testid=testid,
+            source_url=source_url,
+            qr_url=qr_url,
+        )
+
+        letterhead = payload.get("letterhead") if isinstance(payload, dict) else None
+        if letterhead and letterhead.get("path"):
+            return FileResponse(
+                str(letterhead.get("path")),
+                media_type="application/pdf",
+                filename=str(letterhead.get("filename") or "outsourced_letterhead.pdf"),
+            )
+
+        allow_base = _is_truthy(fallback_to_base)
+        base = payload.get("base") if isinstance(payload, dict) else None
+        if allow_base and isinstance(base, dict) and base.get("path"):
+            return FileResponse(
+                str(base.get("path")),
+                media_type="application/pdf",
+                filename=str(base.get("filename") or "outsourced_base.pdf"),
+            )
+
+        raise HTTPException(status_code=404, detail={
+            "code": "OUTSOURCED_LETTERHEAD_NOT_FOUND",
+            "payload": payload,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

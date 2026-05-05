@@ -3,3 +3,6 @@ uvicorn
 requests
 pypdf
 playwright
+opencv-python-headless
+PyMuPDF
+numpy

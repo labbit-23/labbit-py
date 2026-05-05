@@ -151,6 +151,8 @@ def _process_status_rows(rows, identifier):
     mrno = first_non_empty(rows, "MRNO", "mrno", "CREGNO", "cregno", "UHID", "uhid")
     raw_phone = first_non_empty(rows, "PHONENO", "phoneno", "MOBILENO", "mobileno", "PHONE", "phone")
     test_date = first_non_empty(rows, "REQDT", "reqdt", "TEST_DATE", "test_date", "REQDATE", "reqdate", "BOOKING_DATE", "booking_date")
+    source_id = first_non_empty(rows, "SOURCEID", "sourceid", "SOURCE_ID", "source_id", "REFDOCTOR", "refdoctor")
+    source_name = first_non_empty(rows, "SOURCENM", "sourcenm", "SOURCE_NAME", "source_name", "DRNAME", "drname")
 
     return {
         # keep original key for compatibility
@@ -166,6 +168,8 @@ def _process_status_rows(rows, identifier):
         "patient_phone": normalize_phone(raw_phone),
         "phoneno": raw_phone,
         "test_date": test_date,
+        "source_id": source_id,
+        "source_name": source_name,
         "first_approved_at": first_approved_at.isoformat() if first_approved_at else None,
         "latest_approved_at": latest_approved_at.isoformat() if latest_approved_at else None,
         "tests": normalized_rows
