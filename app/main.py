@@ -25,6 +25,7 @@ from app.outsourced_report_fetcher import fetch_outsourced_report, classify_outs
 from app.dispatch_context import build_dispatch_context
 from app.pdf_utils import apply_background
 import logging
+import copy
 import os
 import configparser
 from pathlib import Path
@@ -208,8 +209,12 @@ def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
 
     for idx, page in enumerate(reader.pages):
         if idx == 0:
-            page.merge_page(bg_page)
-        writer.add_page(page)
+            # Underlay: keep report content above, place background behind it.
+            merged = copy.copy(bg_page)
+            merged.merge_page(page)
+            writer.add_page(merged)
+        else:
+            writer.add_page(page)
 
     with open(output_pdf, "wb") as handle:
         writer.write(handle)
