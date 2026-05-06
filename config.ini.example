@@ -72,4 +72,10 @@ do_not_send_source_ids =
 fetchreport_fromqr = 1
 # overlay(default): SDRC background on top of page-1 content
 # underlay: SDRC background behind page-1 content
+# logo_only: place assets/logo.png at configured position on page 1
 header_merge_mode = overlay
+# logo placement (points). Use either width or height (or both; width wins).
+logo_left_pt = 36
+logo_top_pt = 20
+logo_width_pt = 120
+# logo_height_pt =

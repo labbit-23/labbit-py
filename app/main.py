@@ -25,6 +25,7 @@ from app.outsourced_report_fetcher import fetch_outsourced_report, classify_outs
 from app.dispatch_context import build_dispatch_context
 from app.pdf_utils import apply_background
 import logging
+import tempfile
 import copy
 import os
 import configparser
@@ -203,7 +204,74 @@ def _outsourced_header_merge_mode():
     raw = str(config.get("outsourced", "header_merge_mode", fallback="overlay") or "overlay").strip().lower()
     if raw in {"underlay", "background_behind", "behind"}:
         return "underlay"
+    if raw in {"logo_only", "logo", "logo-overlay"}:
+        return "logo_only"
     return "overlay"
+
+
+def _cfg_float(section, key, fallback):
+    try:
+        return float(str(config.get(section, key, fallback=str(fallback)) or fallback).strip())
+    except Exception:
+        return float(fallback)
+
+
+def _make_logo_stamp_pdf(page_width_pt, page_height_pt):
+    logo_path = str(ROOT_DIR / "assets" / "logo.png")
+    if not os.path.exists(logo_path):
+        raise Exception("Logo not found: " + logo_path)
+
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise Exception(f"Pillow required for logo_only mode: {exc}")
+
+    left = _cfg_float("outsourced", "logo_left_pt", 36)
+    top = _cfg_float("outsourced", "logo_top_pt", 20)
+    width_cfg = str(config.get("outsourced", "logo_width_pt", fallback="") or "").strip()
+    height_cfg = str(config.get("outsourced", "logo_height_pt", fallback="") or "").strip()
+
+    with Image.open(logo_path) as im:
+        src = im.convert("RGBA")
+        src_w, src_h = src.size
+
+        if src_w <= 0 or src_h <= 0:
+            raise Exception("Invalid logo dimensions")
+
+        width_pt = float(width_cfg) if width_cfg else None
+        height_pt = float(height_cfg) if height_cfg else None
+
+        if width_pt and height_pt:
+            # Width wins to avoid accidental distortion when both are set.
+            height_pt = width_pt * (src_h / src_w)
+        elif width_pt:
+            height_pt = width_pt * (src_h / src_w)
+        elif height_pt:
+            width_pt = height_pt * (src_w / src_h)
+        else:
+            width_pt = 120.0
+            height_pt = width_pt * (src_h / src_w)
+
+        # 1pt at 72dpi equals 1px in this canvas model.
+        canvas_w = max(1, int(round(page_width_pt)))
+        canvas_h = max(1, int(round(page_height_pt)))
+        tgt_w = max(1, int(round(width_pt)))
+        tgt_h = max(1, int(round(height_pt)))
+
+        # top is measured from top edge; PIL y starts at top.
+        x = int(round(left))
+        y_top = int(round(top))
+        y = y_top
+
+        overlay = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 0))
+        logo_resized = src.resize((tgt_w, tgt_h), resample=Image.LANCZOS)
+        overlay.alpha_composite(logo_resized, dest=(x, y))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_pdf = tmp.name
+        overlay.convert("RGB").save(tmp_pdf, "PDF", resolution=72.0)
+
+    return tmp_pdf
 
 
 def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
@@ -216,21 +284,41 @@ def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
 
     bg_page = bg_reader.pages[0]
     merge_mode = _outsourced_header_merge_mode()
+    logo_stamp_pdf = ""
+    logo_page = None
 
-    for idx, page in enumerate(reader.pages):
-        if idx == 0:
-            if merge_mode == "underlay":
-                merged = copy.copy(bg_page)
-                merged.merge_page(page)
-                writer.add_page(merged)
+    if merge_mode == "logo_only":
+        if not reader.pages:
+            raise Exception("Input PDF has no pages")
+        first = reader.pages[0]
+        logo_stamp_pdf = _make_logo_stamp_pdf(float(first.mediabox.width), float(first.mediabox.height))
+        logo_reader = PdfReader(logo_stamp_pdf)
+        logo_page = logo_reader.pages[0]
+
+    try:
+        for idx, page in enumerate(reader.pages):
+            if idx == 0:
+                if merge_mode == "underlay":
+                    merged = copy.copy(bg_page)
+                    merged.merge_page(page)
+                    writer.add_page(merged)
+                elif merge_mode == "logo_only":
+                    page.merge_page(logo_page)
+                    writer.add_page(page)
+                else:
+                    page.merge_page(bg_page)
+                    writer.add_page(page)
             else:
-                page.merge_page(bg_page)
                 writer.add_page(page)
-        else:
-            writer.add_page(page)
 
-    with open(output_pdf, "wb") as handle:
-        writer.write(handle)
+        with open(output_pdf, "wb") as handle:
+            writer.write(handle)
+    finally:
+        if logo_stamp_pdf and os.path.exists(logo_stamp_pdf):
+            try:
+                os.remove(logo_stamp_pdf)
+            except Exception:
+                pass
 
     return output_pdf
 
