@@ -222,54 +222,44 @@ def _make_logo_stamp_pdf(page_width_pt, page_height_pt):
         raise Exception("Logo not found: " + logo_path)
 
     try:
-        from PIL import Image
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.utils import ImageReader
     except Exception as exc:
-        raise Exception(f"Pillow required for logo_only mode: {exc}")
+        raise Exception(f"reportlab required for logo_only mode: {exc}")
 
     left = _cfg_float("outsourced", "logo_left_pt", 36)
     top = _cfg_float("outsourced", "logo_top_pt", 20)
     width_cfg = str(config.get("outsourced", "logo_width_pt", fallback="") or "").strip()
     height_cfg = str(config.get("outsourced", "logo_height_pt", fallback="") or "").strip()
 
-    with Image.open(logo_path) as im:
-        src = im.convert("RGBA")
-        src_w, src_h = src.size
+    image = ImageReader(logo_path)
+    src_w, src_h = image.getSize()
+    if src_w <= 0 or src_h <= 0:
+        raise Exception("Invalid logo dimensions")
 
-        if src_w <= 0 or src_h <= 0:
-            raise Exception("Invalid logo dimensions")
+    width_pt = float(width_cfg) if width_cfg else None
+    height_pt = float(height_cfg) if height_cfg else None
 
-        width_pt = float(width_cfg) if width_cfg else None
-        height_pt = float(height_cfg) if height_cfg else None
+    if width_pt and height_pt:
+        height_pt = width_pt * (src_h / src_w)
+    elif width_pt:
+        height_pt = width_pt * (src_h / src_w)
+    elif height_pt:
+        width_pt = height_pt * (src_w / src_h)
+    else:
+        width_pt = 120.0
+        height_pt = width_pt * (src_h / src_w)
 
-        if width_pt and height_pt:
-            # Width wins to avoid accidental distortion when both are set.
-            height_pt = width_pt * (src_h / src_w)
-        elif width_pt:
-            height_pt = width_pt * (src_h / src_w)
-        elif height_pt:
-            width_pt = height_pt * (src_w / src_h)
-        else:
-            width_pt = 120.0
-            height_pt = width_pt * (src_h / src_w)
+    x = float(left)
+    y = float(page_height_pt) - float(top) - float(height_pt)
 
-        # 1pt at 72dpi equals 1px in this canvas model.
-        canvas_w = max(1, int(round(page_width_pt)))
-        canvas_h = max(1, int(round(page_height_pt)))
-        tgt_w = max(1, int(round(width_pt)))
-        tgt_h = max(1, int(round(height_pt)))
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp_pdf = tmp.name
 
-        # top is measured from top edge; PIL y starts at top.
-        x = int(round(left))
-        y_top = int(round(top))
-        y = y_top
-
-        overlay = Image.new("RGBA", (canvas_w, canvas_h), (255, 255, 255, 0))
-        logo_resized = src.resize((tgt_w, tgt_h), resample=Image.LANCZOS)
-        overlay.alpha_composite(logo_resized, dest=(x, y))
-
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp_pdf = tmp.name
-        overlay.convert("RGB").save(tmp_pdf, "PDF", resolution=72.0)
+    c = canvas.Canvas(tmp_pdf, pagesize=(float(page_width_pt), float(page_height_pt)))
+    c.drawImage(image, x, y, width=float(width_pt), height=float(height_pt), mask='auto', preserveAspectRatio=True)
+    c.showPage()
+    c.save()
 
     return tmp_pdf
 
