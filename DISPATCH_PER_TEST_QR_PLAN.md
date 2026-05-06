@@ -107,3 +107,12 @@ Already in place:
 ## Backout
 Single switch to legacy requisition-level combined dispatch path.
 All per-test logs retained for diagnostics.
+
+## TODO: Graceful API Deploy (PM2 Cluster Reload)
+- Evaluate moving `labbit-api` from PM2 `fork` to `cluster` mode (`instances=2` initially) and use `pm2 reload` instead of hard restart.
+- Before rollout, audit codepaths for process-local state assumptions:
+  - in-memory caches
+n  - session reuse behavior
+  - filesystem write/read race conditions across workers
+- Validate long-running report calls under `kill_timeout` and set safe timeouts for zero/minimal interruption.
+- Add deploy runbook steps: `reload --update-env` + post-reload health checks.

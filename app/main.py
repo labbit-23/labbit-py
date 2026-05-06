@@ -197,6 +197,15 @@ def _is_truthy(value):
     return text in {"1", "true", "yes", "y", "on"}
 
 
+
+
+def _outsourced_header_merge_mode():
+    raw = str(config.get("outsourced", "header_merge_mode", fallback="overlay") or "overlay").strip().lower()
+    if raw in {"underlay", "background_behind", "behind"}:
+        return "underlay"
+    return "overlay"
+
+
 def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
     if not os.path.exists(bg_pdf_path):
         raise Exception("Background not found: " + bg_pdf_path)
@@ -206,13 +215,17 @@ def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
     writer = PdfWriter()
 
     bg_page = bg_reader.pages[0]
+    merge_mode = _outsourced_header_merge_mode()
 
     for idx, page in enumerate(reader.pages):
         if idx == 0:
-            # Underlay: keep report content above, place background behind it.
-            merged = copy.copy(bg_page)
-            merged.merge_page(page)
-            writer.add_page(merged)
+            if merge_mode == "underlay":
+                merged = copy.copy(bg_page)
+                merged.merge_page(page)
+                writer.add_page(merged)
+            else:
+                page.merge_page(bg_page)
+                writer.add_page(page)
         else:
             writer.add_page(page)
 

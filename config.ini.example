@@ -70,3 +70,6 @@ do_not_send_source_ids =
 # 1 => extract QR from attached PDF and fetch external letterhead
 # 0 => skip QR fetch and use attached PDF directly
 fetchreport_fromqr = 1
+# overlay(default): SDRC background on top of page-1 content
+# underlay: SDRC background behind page-1 content
+header_merge_mode = overlay
