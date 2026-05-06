@@ -6,3 +6,4 @@ playwright
 opencv-python-headless
 PyMuPDF
 numpy
+reportlab
