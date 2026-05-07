@@ -3,6 +3,8 @@ base_url = http://120.138.8.37:9999
 context = shivam
 
 [api]
+# Base used for DgWordoleVF filename resolver
+radiology_wordole_base = http://120.138.8.37:9999/shivam
 lookup_url = http://120.138.8.37:7777/clouduat/TApiQuery
 terminalid = YOUR_TERMINAL_ID
 webformid = wf269
@@ -79,3 +81,9 @@ logo_left_pt = 36
 logo_top_pt = 20
 logo_width_pt = 120
 # logo_height_pt =
+
+
+[radiology]
+# 1 => resolve radiology filename via DgWordoleVF on :9999 first, then fetch PDF from wordimages
+# 0 => keep legacy static wordimages fetch
+use_wordole_resolver = 0

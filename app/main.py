@@ -216,6 +216,12 @@ def _cfg_float(section, key, fallback):
         return float(fallback)
 
 
+def _cfg_page_scope(section, key, fallback="1"):
+    raw = str(config.get(section, key, fallback=fallback) or fallback).strip().lower()
+    return "all" if raw == "all" else "1"
+
+
+
 def _make_logo_stamp_pdf(page_width_pt, page_height_pt):
     logo_path = str(ROOT_DIR / "assets" / "logo.png")
     if not os.path.exists(logo_path):
@@ -274,6 +280,8 @@ def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
 
     bg_page = bg_reader.pages[0]
     merge_mode = _outsourced_header_merge_mode()
+    header_scope = _cfg_page_scope("outsourced", "header_apply_pages", fallback="1")
+    logo_scope = _cfg_page_scope("outsourced", "logo_apply_pages", fallback="1")
     logo_stamp_pdf = ""
     logo_page = None
 
@@ -287,17 +295,19 @@ def _apply_background_first_page(input_pdf, output_pdf, bg_pdf_path):
 
     try:
         for idx, page in enumerate(reader.pages):
-            if idx == 0:
-                if merge_mode == "underlay":
-                    merged = copy.copy(bg_page)
-                    merged.merge_page(page)
-                    writer.add_page(merged)
-                elif merge_mode == "logo_only":
-                    page.merge_page(logo_page)
-                    writer.add_page(page)
-                else:
-                    page.merge_page(bg_page)
-                    writer.add_page(page)
+            apply_header = (header_scope == "all") or (idx == 0)
+            apply_logo = (logo_scope == "all") or (idx == 0)
+
+            if merge_mode == "underlay" and apply_header:
+                merged = copy.copy(bg_page)
+                merged.merge_page(page)
+                writer.add_page(merged)
+            elif merge_mode == "logo_only" and apply_logo:
+                page.merge_page(logo_page)
+                writer.add_page(page)
+            elif merge_mode == "overlay" and apply_header:
+                page.merge_page(bg_page)
+                writer.add_page(page)
             else:
                 writer.add_page(page)
 
