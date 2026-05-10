@@ -502,7 +502,10 @@ def latest_report(phone):
 
     _require_dispatch_allowed(reqid=reqid)
 
-    path = get_combined_report(reqid)
+    try:
+        path = get_combined_report(reqid)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"latest report unavailable: {exc}") from exc
 
     return FileResponse(
         path,
@@ -543,7 +546,10 @@ def report_path(reqid):
 @app.get("/report-status/{reqno}")
 def report_status(reqno):
 
-    data = fetch_report_status(reqno)
+    try:
+        data = fetch_report_status(reqno)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"report status unavailable: {exc}") from exc
 
     return _attach_dispatch_policy(data)
 

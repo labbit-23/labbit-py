@@ -34,6 +34,8 @@ REPORT_LOCK_WAIT_SECONDS = int(os.environ.get("REPORT_LOCK_WAIT_SECONDS", "15"))
 REPORT_LOCK_POLL_SECONDS = float(os.environ.get("REPORT_LOCK_POLL_SECONDS", "0.2"))
 
 SESSION_TIMEOUT = 1800  # 30 minutes
+HTTP_TIMEOUT_FAST = (3, 20)
+HTTP_TIMEOUT_REPORT = (5, 90)
 
 session = None
 last_login = 0
@@ -115,14 +117,14 @@ def login():
 
     print("Logging in...")
     session.cookies.set("style", "teal")
-    session.get(f"{APP}/ClientLogin.jsp")
+    session.get(f"{APP}/ClientLogin.jsp", timeout=HTTP_TIMEOUT_FAST)
 
     r = session.get(f"{APP}/ClientLoginLoad.jsp", params={
         "opt": USER,
         "table": "loc",
         "uname": USER,
         "reg": REG
-    })
+    }, timeout=HTTP_TIMEOUT_FAST)
 
     loc_name, loc_id = first_pair(r.text)
 
@@ -131,7 +133,7 @@ def login():
         "table": "depts",
         "uname": USER,
         "reg": REG
-    })
+    }, timeout=HTTP_TIMEOUT_FAST)
 
     dept_name, dept_id = first_pair(r.text)
 
@@ -140,7 +142,7 @@ def login():
         "table": "subdepts",
         "uname": USER,
         "reg": REG
-    })
+    }, timeout=HTTP_TIMEOUT_FAST)
 
     subdept_name, subdept_id = first_pair(r.text)
 
@@ -148,7 +150,7 @@ def login():
         "table": "shifts",
         "uname": USER,
         "reg": REG
-    })
+    }, timeout=HTTP_TIMEOUT_FAST)
 
     shift_name, shift_id = first_pair(r.text)
 
@@ -166,7 +168,7 @@ def login():
         "reg": REG,
         "version": VERSION,
         "clienttype": CLIENTTYPE
-    })
+    }, timeout=HTTP_TIMEOUT_FAST)
 
     last_login = time.time()
 
@@ -210,7 +212,7 @@ def download_report(reqid, include_header=True, printtype="1", reqno=None):
     if reqno:
         params["reqno"] = str(reqno)
 
-    r = session.get(f"{APP}/ReportDispatchPrints", params=params)
+    r = session.get(f"{APP}/ReportDispatchPrints", params=params, timeout=HTTP_TIMEOUT_REPORT)
 
     # Lab report
     if "application/pdf" in r.headers.get("Content-Type", ""):
@@ -259,7 +261,8 @@ def get_trend_report(mrno):
             "userid": "IU000120",
             "usernm": "ADMIN",
             "locid": "Loc00001"
-        }
+        },
+        timeout=HTTP_TIMEOUT_FAST,
     )
 
     # STEP 2 — build dataset
@@ -274,7 +277,8 @@ def get_trend_report(mrno):
             "fromdt": "12/03/2026",
             "todt": "12/03/2026",
             "years1": "2025"
-        }
+        },
+        timeout=HTTP_TIMEOUT_REPORT,
     )
 
     # STEP 3 — render PDF
@@ -298,7 +302,7 @@ def get_trend_report(mrno):
         "thirddate": "12/03/2026"
     }
 
-    r = session.get(f"{APP}/globalreport", params=params)
+    r = session.get(f"{APP}/globalreport", params=params, timeout=HTTP_TIMEOUT_REPORT)
 
     print("Content-Type:", r.headers.get("Content-Type"))
     print("Response length:", len(r.content))
@@ -388,6 +392,8 @@ def get_combined_report(reqid, include_header=True, apply_radiology_background=T
         # 5. Merge both into cached artifact
         # -----------------------------
         return merge_pdfs(files, cache_path)
+    except requests.RequestException as exc:
+        raise Exception(f"UPSTREAM_REQUEST_FAILED: {exc}") from exc
     finally:
         if lock_fd is not None:
             _release_key_lock(lock_fd, lock_path)

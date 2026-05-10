@@ -23,7 +23,12 @@ def fetch_reqids(phone):
 
     url = f"{BASE_URL}?webformid={WEBFORMID}&terminalid={TERMINAL_ID}&data={payload}"
 
-    r = requests.get(url)
+    try:
+        r = requests.get(url, timeout=(3, 20))
+        r.raise_for_status()
+    except requests.RequestException as e:
+        print(f"fetch_reqids failed: {e}")
+        return []
 
     data = r.json()
 

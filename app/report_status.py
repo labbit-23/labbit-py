@@ -190,10 +190,11 @@ def fetch_report_status(reqno):
 
     url = f"{STATUS_API}&data={payload}"
 
-    r = requests.get(url)
-
-    if r.status_code != 200:
-        raise Exception("Report status API failed")
+    try:
+        r = requests.get(url, timeout=(3, 20))
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        raise Exception(f"Report status API failed: {exc}") from exc
 
     rows = r.json()
 

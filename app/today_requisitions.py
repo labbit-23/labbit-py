@@ -27,6 +27,14 @@ def fetch_today_requisitions(date):
         "qry": query
     }
 
-    r = requests.post(LOOKUP_URL, json=payload)
+    try:
+        r = requests.post(LOOKUP_URL, json=payload, timeout=(3, 30))
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"fetch_today_requisitions failed: {exc}")
+        return []
 
-    return r.json()["data"]
+    data = r.json()
+    if isinstance(data, dict):
+        return data.get("data") or []
+    return []

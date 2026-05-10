@@ -10,6 +10,7 @@ config.read(ROOT_DIR / "config.ini")
 
 TREND_URL = config["trends"]["url"]
 OUTPUT_DIR = config["paths"]["reports"]
+REQUEST_TIMEOUT = (5, 90)
 
 
 def ensure_output_dir():
@@ -34,7 +35,11 @@ def get_trend_report(mrno):
         "years1": datetime.today().strftime("%Y")
     }
 
-    r = session.post(TREND_URL, data=payload)
+    try:
+        r = session.post(TREND_URL, data=payload, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        raise Exception(f"Trend report fetch failed: {exc}") from exc
 
     ensure_output_dir()
 
