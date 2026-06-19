@@ -66,6 +66,33 @@ def should_run_entry(cfg, node_role):
     return False
 
 
+def is_in_scheduled_downtime(cfg):
+    """Check if service is in its scheduled downtime window (IST timezone)"""
+    scheduled = str(cfg.get("scheduled_downtime", "") or "").strip()
+    if not scheduled or scheduled.lower() in {"", "none", "false"}:
+        return False
+
+    try:
+        # Format: 2100-0800 (start_hhmm-end_hhmm)
+        parts = scheduled.split("-")
+        if len(parts) != 2:
+            return False
+
+        start_hhmm = int(parts[0].strip())
+        end_hhmm = int(parts[1].strip())
+    except (ValueError, AttributeError):
+        return False
+
+    # Get current time in IST
+    now_ist = datetime.now(timezone.utc).astimezone()
+    current_hhmm = now_ist.hour * 100 + now_ist.minute
+
+    # Handle window crossing midnight (e.g., 21:00 to 08:00)
+    if start_hhmm > end_hhmm:
+        return current_hhmm >= start_hhmm or current_hhmm < end_hhmm
+    return current_hhmm >= start_hhmm and current_hhmm < end_hhmm
+
+
 def append_node_role_to_service_key(service_row, node_role):
     row = dict(service_row or {})
     base_key = str(row.get("service_key", "") or "").strip()
@@ -146,6 +173,10 @@ def build_due_payload(config, last_run_by_service=None, now_monotonic=None):
         service_interval = int(cfg.get("interval_seconds", monitoring_cfg.get("interval_seconds", "60")))
         last_run = last_run_by_service.get(section_name)
         if last_run is not None and now_monotonic - last_run < service_interval:
+            continue
+
+        # Skip checks during scheduled downtime window
+        if is_in_scheduled_downtime(cfg):
             continue
 
         check_result = run_check(section_name, cfg, default_timeout)
