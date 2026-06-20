@@ -68,17 +68,31 @@ def _build_combined_cache_path(reqid, include_header=True, apply_radiology_backg
     )
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
     safe_reqid = str(reqid or "UNKNOWN").strip() or "UNKNOWN"
-    return os.path.join(COMBINED_CACHE_DIR, f"{safe_reqid}_{digest}.pdf")
+    pdf_path = os.path.join(COMBINED_CACHE_DIR, f"{safe_reqid}_{digest}.pdf")
+    meta_path = os.path.join(COMBINED_CACHE_DIR, f"{safe_reqid}_{digest}.meta")
+    return pdf_path, meta_path
 
 
-def _is_recent_file(path, window_seconds):
-    if not path or not os.path.exists(path):
+def _is_recent_file(pdf_path, meta_path, window_seconds):
+    if not pdf_path or not os.path.exists(pdf_path):
+        return False
+    if not meta_path or not os.path.exists(meta_path):
         return False
     try:
-        age_seconds = time.time() - os.path.getmtime(path)
+        created_at = float(open(meta_path).read().strip())
+        age_seconds = time.time() - created_at
         return age_seconds >= 0 and age_seconds <= max(0, window_seconds)
     except Exception:
         return False
+
+
+def _write_cache_metadata(meta_path):
+    try:
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+        with open(meta_path, 'w') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        print(f"Warning: failed to write cache metadata {meta_path}: {e}")
 
 
 def _acquire_key_lock(lock_path, wait_seconds, poll_seconds):
@@ -324,7 +338,7 @@ def get_trend_report(mrno):
 
 def get_combined_report(reqid, include_header=True, apply_radiology_background=True, printtype="1", reqno=None):
     ensure_output_dir()
-    cache_path = _build_combined_cache_path(
+    cache_path, meta_path = _build_combined_cache_path(
         reqid=reqid,
         include_header=include_header,
         apply_radiology_background=apply_radiology_background,
@@ -332,7 +346,7 @@ def get_combined_report(reqid, include_header=True, apply_radiology_background=T
         reqno=reqno
     )
 
-    if _is_recent_file(cache_path, REPORT_REUSE_WINDOW_SECONDS):
+    if _is_recent_file(cache_path, meta_path, REPORT_REUSE_WINDOW_SECONDS):
         return cache_path
 
     lock_path = f"{cache_path}.lock"
@@ -350,7 +364,7 @@ def get_combined_report(reqid, include_header=True, apply_radiology_background=T
 
     try:
         # Double-check after acquiring lock in case another request already generated it.
-        if _is_recent_file(cache_path, REPORT_REUSE_WINDOW_SECONDS):
+        if _is_recent_file(cache_path, meta_path, REPORT_REUSE_WINDOW_SECONDS):
             return cache_path
 
         files = []
@@ -386,12 +400,15 @@ def get_combined_report(reqid, include_header=True, apply_radiology_background=T
         # -----------------------------
         if len(files) == 1:
             shutil.copyfile(files[0], cache_path)
+            _write_cache_metadata(meta_path)
             return cache_path
 
         # -----------------------------
         # 5. Merge both into cached artifact
         # -----------------------------
-        return merge_pdfs(files, cache_path)
+        result = merge_pdfs(files, cache_path)
+        _write_cache_metadata(meta_path)
+        return result
     except requests.RequestException as exc:
         raise Exception(f"UPSTREAM_REQUEST_FAILED: {exc}") from exc
     finally:
