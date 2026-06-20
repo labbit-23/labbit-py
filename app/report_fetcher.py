@@ -29,9 +29,9 @@ CLIENTTYPE = config["defaults"]["clienttype"]
 OUTPUT_DIR = config["paths"]["reports"]
 COMBINED_CACHE_DIR = os.path.join(OUTPUT_DIR, "_combined_cache")
 
-REPORT_REUSE_WINDOW_SECONDS = int(os.environ.get("REPORT_REUSE_WINDOW_SECONDS", "60"))
-REPORT_LOCK_WAIT_SECONDS = int(os.environ.get("REPORT_LOCK_WAIT_SECONDS", "15"))
-REPORT_LOCK_POLL_SECONDS = float(os.environ.get("REPORT_LOCK_POLL_SECONDS", "0.2"))
+REPORT_REUSE_WINDOW_SECONDS = int(config.get("server", "report_cache_window_seconds", fallback="60"))
+REPORT_LOCK_WAIT_SECONDS = int(config.get("server", "report_lock_wait_seconds", fallback="15"))
+REPORT_LOCK_POLL_SECONDS = float(config.get("server", "report_lock_poll_seconds", fallback="0.2"))
 
 SESSION_TIMEOUT = 1800  # 30 minutes
 HTTP_TIMEOUT_FAST = (3, 20)
