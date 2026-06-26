@@ -199,14 +199,20 @@ def extract_url_candidates_from_pdf(pdf_path, debug=None):
 
 def _download_pdf(url, timeout=60):
     report_fetcher.ensure_session()
-    response = report_fetcher.session.get(url, timeout=timeout, allow_redirects=True)
+    try:
+        response = report_fetcher.session.get(url, timeout=timeout, allow_redirects=True)
+    except Exception as exc:
+        raise Exception(f"LETTERHEAD_FETCH_NETWORK_ERROR url={url}: {str(exc)}")
+
     if response.status_code != 200:
-        raise Exception(f"LETTERHEAD_FETCH_FAILED status={response.status_code}")
+        raise Exception(f"LETTERHEAD_FETCH_FAILED status={response.status_code} url={url} reason={response.reason or 'unknown'}")
 
     content = response.content or b""
+    if not content:
+        raise Exception(f"LETTERHEAD_EMPTY_RESPONSE url={url}")
     content_type = str(response.headers.get("Content-Type", "")).lower()
     if "application/pdf" not in content_type and not _is_pdf_bytes(content):
-        raise Exception("LETTERHEAD_NOT_PDF")
+        raise Exception(f"LETTERHEAD_NOT_PDF url={url} content_type={content_type} bytes={len(content)}")
 
     return content
 
@@ -296,17 +302,28 @@ def _find_attachment_rows(reqid, testid):
         "no": str(testid).strip(),
         "formname": "/Dg/FWreporitng.jsp",
     }
-    response = report_fetcher.session.get(url, params=params, timeout=30)
+    try:
+        response = report_fetcher.session.get(url, params=params, timeout=30)
+    except Exception as exc:
+        print(f"[OUTSOURCED] Attachment lookup failed (network): reqid={reqid} testid={testid}: {exc}")
+        return []
+
     if response.status_code != 200:
+        print(f"[OUTSOURCED] Attachment lookup failed (HTTP): reqid={reqid} testid={testid} status={response.status_code}")
         return []
 
     try:
         data = response.json()
-    except Exception:
+    except Exception as exc:
+        print(f"[OUTSOURCED] Attachment lookup failed (JSON parse): reqid={reqid} testid={testid}: {exc}")
         return []
 
     if not isinstance(data, list):
+        print(f"[OUTSOURCED] Attachment lookup returned non-list: reqid={reqid} testid={testid} type={type(data).__name__}")
         return []
+
+    if not data:
+        print(f"[OUTSOURCED] No attachment rows found: reqid={reqid} testid={testid}")
 
     return data
 

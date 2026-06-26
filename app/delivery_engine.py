@@ -93,8 +93,31 @@ def get_outsourced_report_url(reqid, testid):
 
 
 def verify_pdf_download(url):
-    response = requests.get(url, timeout=REQUEST_TIMEOUT)
-    return response.status_code == 200 and "application/pdf" in response.headers.get("Content-Type", "")
+    try:
+        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+
+        # 404 = report doesn't exist, fail fast
+        if response.status_code == 404:
+            return False, "HTTP 404 Not Found (report does not exist)"
+
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code} {response.reason}"
+
+        content_type = response.headers.get("Content-Type", "")
+        if "application/pdf" not in content_type:
+            return False, f"Wrong Content-Type: {content_type}"
+
+        if not response.content:
+            return False, "Empty response body"
+
+        return True, None
+    except requests.exceptions.Timeout:
+        return False, f"TIMEOUT after {REQUEST_TIMEOUT}s"
+    except requests.exceptions.ConnectionError as exc:
+        return False, f"CONNECTION_ERROR: {str(exc)[:80]}"
+    except Exception as exc:
+        exc_type = type(exc).__name__
+        return False, f"{exc_type}: {str(exc)[:80]}"
 
 
 def build_template_payload(destination, document_url, filename):
@@ -167,20 +190,27 @@ def _send_normal_if_ready(reqno, reqid, phone, overall_status, delivery_status):
         _safe_update_status(reqno, "P", "WHATSAPP", "PARTIAL REPORT")
         return
     if overall_status != "FULL_REPORT":
+        clog(f"[NORMAL][SKIP] reqno={reqno} overall_status={overall_status} (not FULL_REPORT - likely outsourced_only)", "blue")
         return
 
     report_url = get_report_url(reqid)
-    if not verify_pdf_download(report_url):
-        _safe_update_status(reqno, "F", "WHATSAPP", "DOWNLOAD FAILED")
+    clog(f"[NORMAL][PDF-VERIFY-START] reqno={reqno} url={report_url}", "cyan")
+    is_valid, pdf_error = verify_pdf_download(report_url)
+    if not is_valid:
+        clog(f"[NORMAL][PDF-VERIFY-FAILED] reqno={reqno}: {pdf_error}", "red")
+        _safe_update_status(reqno, "F", "ENGINE", f"NO REGULAR REPORT ({pdf_error})")
         return
+    clog(f"[NORMAL][PDF-VERIFY-OK] reqno={reqno}", "green")
 
     _safe_update_status(reqno, "L", "ENGINE", "PROCESSING NORMAL")
     try:
+        clog(f"[NORMAL][WHATSAPP-SEND-START] reqno={reqno} to={phone}", "cyan")
         send_whatsapp(phone, reqid, reqno, document_url=report_url, filename=f"{reqid}.pdf")
+        clog(f"[NORMAL][WHATSAPP-SEND-OK] reqno={reqno}", "green")
         _safe_update_status(reqno, "S", "WHATSAPP", "OK NORMAL")
     except Exception as exc:
-        clog(f"[ERROR] normal send {reqno}: {exc}", "red")
-        _safe_update_status(reqno, "F", "WHATSAPP", "WHATSAPP FAILED")
+        clog(f"[NORMAL][WHATSAPP-SEND-ERROR] reqno={reqno}: {str(exc)[:200]}", "red")
+        _safe_update_status(reqno, "F", "WHATSAPP", f"WHATSAPP FAILED: {str(exc)[:100]}")
 
 
 def _send_outsourced_actions(reqno, reqid, phone, context):
@@ -213,19 +243,25 @@ def _send_outsourced_actions(reqno, reqid, phone, context):
 
         report_url = get_outsourced_report_url(reqid, testid)
         dispatch_kind = f"OUTSOURCED_{mode.upper()}" if mode else "OUTSOURCED"
-        if not verify_pdf_download(report_url):
-            _safe_update_status(reqno, "F", "ENGINE", f"OUTSOURCED FLAGGED {testid}")
+        clog(f"[OUTSOURCED][PDF-VERIFY-START] reqno={reqno} testid={testid} url={report_url}", "cyan")
+        is_valid, pdf_error = verify_pdf_download(report_url)
+        if not is_valid:
+            clog(f"[OUTSOURCED][PDF-INVALID] reqno={reqno} testid={testid}: {pdf_error}", "red")
+            _safe_update_status(reqno, "F", "ENGINE", f"OUTSOURCED PDF INVALID {testid} ({pdf_error})")
             continue
+        clog(f"[OUTSOURCED][PDF-VERIFY-OK] reqno={reqno} testid={testid}", "green")
 
         _safe_update_status(reqno, "L", "ENGINE", f"PROCESSING {dispatch_kind} {testid}")
         try:
+            clog(f"[OUTSOURCED][WHATSAPP-SEND-START] reqno={reqno} testid={testid} to={phone}", "cyan")
             send_whatsapp(phone, reqid, reqno, document_url=report_url, filename=f"OUTSOURCED_{reqid}_{testid}.pdf")
             SENT_OUTSOURCED_KEYS.add(key)
+            clog(f"[OUTSOURCED][WHATSAPP-SEND-OK] reqno={reqno} testid={testid}", "green")
             _safe_update_status(reqno, "S", "WHATSAPP", f"OK {dispatch_kind} {testid}")
             clog(f"[OUTSOURCED][OK] reqno={reqno} testid={testid} mode={mode}", "green")
         except Exception as exc:
-            clog(f"[OUTSOURCED][ERROR] reqno={reqno} testid={testid}: {exc}", "red")
-            _safe_update_status(reqno, "F", "WHATSAPP", f"WHATSAPP FAILED {testid}")
+            clog(f"[OUTSOURCED][WHATSAPP-SEND-ERROR] reqno={reqno} testid={testid}: {str(exc)[:200]}", "red")
+            _safe_update_status(reqno, "F", "WHATSAPP", f"WHATSAPP FAILED {testid}: {str(exc)[:100]}")
 
 
 def process(row):
