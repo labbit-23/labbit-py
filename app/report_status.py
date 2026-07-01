@@ -139,9 +139,14 @@ def _process_status_rows(rows, identifier):
 
     if lab_total == 0:
         overall = "NO_LAB_TESTS"
-    elif lab_ready == lab_total:
+    elif lab_ready == lab_total and radiology_total == 0:
+        # All lab ready and no radiology
         overall = "FULL_REPORT"
-    elif lab_ready > 0:
+    elif lab_ready == lab_total and radiology_ready == radiology_total:
+        # All lab AND all radiology ready
+        overall = "FULL_REPORT"
+    elif lab_ready > 0 or radiology_ready > 0:
+        # At least some tests ready (but not all)
         overall = "PARTIAL_REPORT"
     else:
         overall = "NO_REPORT"
