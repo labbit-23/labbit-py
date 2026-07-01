@@ -113,6 +113,14 @@ def get_radiology_files(reqid):
 
         if row_value(row, "GROUPID", "groupid") == "GDEP0002":
 
+            # Skip unapproved radiology tests
+            approved_flag = row_value(row, "APPROVEDFLG", "approvedflg")
+            report_status = row_value(row, "REPORT_STATUS", "report_status")
+
+            # Only include if approved (approvedflg=1) or report is RADIOLOGY_READY
+            if str(approved_flag) != "1" and str(report_status) != "RADIOLOGY_READY":
+                continue
+
             testid = row_value(row, "TESTID", "testid")
 
             if reqid and testid:
