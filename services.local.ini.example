@@ -75,6 +75,20 @@ expected_status = 200
 slow_threshold_ms = 2000
 interval_seconds = 120
 
+[service:orthanc_dell]
+type = http_json_auth
+enabled = 1
+run_on = local
+category = orthanc
+label = Orthanc Dell (Backup)
+url = http://100.100.21.90:8042/system
+method = GET
+username = radio
+password = radio
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 120
+
 [service:funnel_mirth_public]
 type = tcp
 enabled = 1
