@@ -12,6 +12,12 @@ try:
 except ImportError:
     SNMP_AVAILABLE = False
 
+try:
+    import paramiko
+    SSH_AVAILABLE = True
+except ImportError:
+    SSH_AVAILABLE = False
+
 
 VALID_STATUSES = {"healthy", "degraded", "down", "unknown"}
 
@@ -334,6 +340,36 @@ def _derive_wan_status(wans):
         return "warning"
     else:
         return "critical"
+
+
+def restart_sophos_firewall(host, username, password, timeout=10):
+    """Restart Sophos firewall via SSH. Returns dict with status and message."""
+    if not SSH_AVAILABLE:
+        return {"status": "error", "message": "paramiko not installed"}
+
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(host, username=username, password=password, timeout=timeout, look_for_keys=False, allow_agent=False)
+
+        # Execute reboot command
+        stdin, stdout, stderr = client.exec_command("reboot")
+        stdout.channel.recv_exit_status()
+        client.close()
+
+        return {
+            "status": "success",
+            "message": f"Reboot command sent to {host}",
+            "timestamp": utc_now_iso()
+        }
+    except paramiko.AuthenticationException:
+        return {"status": "error", "message": "SSH authentication failed"}
+    except paramiko.SSHException as e:
+        return {"status": "error", "message": f"SSH error: {str(e)[:100]}"}
+    except socket.timeout:
+        return {"status": "error", "message": f"SSH timeout after {timeout}s"}
+    except Exception as e:
+        return {"status": "error", "message": f"SSH restart failed: {str(e)[:100]}"}
 
 
 def run_check(section_name, cfg, default_timeout):
