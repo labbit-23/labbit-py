@@ -1064,32 +1064,3 @@ def outsourced_report(
         raise
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-# =====================================
-# Infrastructure: Sophos Firewall
-# =====================================
-
-@app.post("/api/infrastructure/sophos/restart")
-def restart_sophos(auth: HTTPBasic = Depends(get_api_user)):
-    """Restart Sophos firewall. Requires authentication."""
-    from app.monitoring_checks import restart_sophos_firewall
-
-    host = os.environ.get("SOPHOS_SSH_HOST", "192.168.134.1").strip()
-    username = os.environ.get("SOPHOS_SSH_USER", "").strip()
-    password = os.environ.get("SOPHOS_SSH_PASSWORD", "").strip()
-
-    if not username or not password:
-        raise HTTPException(status_code=500, detail="Sophos SSH credentials not configured")
-
-    try:
-        result = restart_sophos_firewall(host, username, password, timeout=10)
-
-        if result["status"] == "success":
-            return {"status": "success", "message": result["message"], "timestamp": result["timestamp"]}
-        else:
-            raise HTTPException(status_code=500, detail=result["message"])
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Restart failed: {str(exc)[:100]}") from exc
