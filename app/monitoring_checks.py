@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 
 import requests
 
+try:
+    from pysnmp.hlapi import getCmd, ObjectType, ObjectIdentity, SnmpEngine, CommunityData, UdpTransportTarget, ContextData
+    SNMP_AVAILABLE = True
+except ImportError:
+    SNMP_AVAILABLE = False
+
 
 VALID_STATUSES = {"healthy", "degraded", "down", "unknown"}
 
@@ -152,6 +158,184 @@ def run_heartbeat_check(section_name, cfg, _default_timeout):
         return _finalize(result, started_at, "down", str(exc), {"path": path})
 
 
+def run_snmp_sophos_check(section_name, cfg, default_timeout):
+    """Poll Sophos XG firewall via SNMP for WAN status and traffic."""
+    result = _base_result(section_name, cfg)
+    started_at = time.perf_counter()
+
+    if not SNMP_AVAILABLE:
+        return _finalize(result, started_at, "down", "pysnmp not installed", {})
+
+    host = cfg.get("host", "").strip()
+    community = cfg.get("community", "").strip()
+    version = cfg.get("version", "2c").strip()
+    timeout = float(cfg.get("timeout_seconds", default_timeout))
+    port = int(cfg.get("port", "161"))
+
+    if not host or not community:
+        return _finalize(result, started_at, "down", "Missing host or community", {})
+
+    try:
+        engine = SnmpEngine()
+
+        # Fetch system info
+        sys_descr = _snmp_get(engine, host, community, version, port, timeout, "1.3.6.1.2.1.1.1.0")
+        sys_uptime = _snmp_get(engine, host, community, version, port, timeout, "1.3.6.1.2.1.1.3.0")
+
+        # Fetch interface names and status
+        if_descr_tree = _snmp_walk(engine, host, community, version, port, timeout, "1.3.6.1.2.1.2.2.1.2")
+        if_status_tree = _snmp_walk(engine, host, community, version, port, timeout, "1.3.6.1.2.1.2.2.1.8")
+        if_hc_in = _snmp_walk(engine, host, community, version, port, timeout, "1.3.6.1.2.1.31.1.1.1.6")
+        if_hc_out = _snmp_walk(engine, host, community, version, port, timeout, "1.3.6.1.2.1.31.1.1.1.10")
+
+        # Parse uptime
+        uptime_str = _format_uptime(sys_uptime) if sys_uptime else "unknown"
+
+        # Build WAN interfaces
+        wans = _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out)
+
+        payload = {
+            "firewall": {
+                "name": cfg.get("label", "SDRC Sophos XG106w"),
+                "host": host,
+                "reachable": True,
+                "uptime": uptime_str,
+                "mode": cfg.get("mode", "multilink_load_balance")
+            },
+            "wans": wans,
+            "timestamp": utc_now_iso()
+        }
+
+        # Determine status
+        wan_status = _derive_wan_status(wans)
+        status = "healthy" if wan_status == "ok" else ("degraded" if wan_status == "warning" else "down")
+        message = f"Firewall up, WANs: {wan_status}"
+
+        return _finalize(result, started_at, status, message, payload)
+    except Exception as exc:
+        return _finalize(result, started_at, "down", f"SNMP error: {str(exc)[:100]}", {"host": host})
+
+
+def _snmp_get(engine, host, community, version, port, timeout, oid):
+    """Fetch single SNMP OID."""
+    try:
+        errorIndication, errorStatus, errorIndex, varBinds = next(
+            getCmd(
+                engine,
+                CommunityData(community, mpModel=0 if version == "1" else 1),
+                UdpTransportTarget((host, port), timeout=timeout),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid))
+            )
+        )
+        if errorIndication or not varBinds:
+            return None
+        return varBinds[0][1]
+    except Exception:
+        return None
+
+
+def _snmp_walk(engine, host, community, version, port, timeout, oid_base):
+    """Walk SNMP subtree."""
+    try:
+        result = {}
+        for errorIndication, errorStatus, errorIndex, varBinds in engine.bulkCmd(
+            CommunityData(community, mpModel=0 if version == "1" else 1),
+            UdpTransportTarget((host, port), timeout=timeout),
+            ContextData(),
+            0, 25,
+            ObjectType(ObjectIdentity(oid_base))
+        ):
+            if errorIndication:
+                break
+            for oid, val in varBinds:
+                result[str(oid)] = val
+        return result
+    except Exception:
+        return {}
+
+
+def _format_uptime(uptime_val):
+    """Convert SNMP uptime (ticks) to readable format."""
+    try:
+        ticks = int(uptime_val)
+        seconds = ticks // 100
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
+    except:
+        return str(uptime_val)
+
+
+def _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out):
+    """Extract Port2 and Port4 from SNMP interface tree."""
+    wans = []
+    wan_map = {}
+
+    # Build name -> status mapping
+    for oid_str, name_val in if_descr_tree.items():
+        name = str(name_val).strip()
+        if name in {"Port2", "Port4"}:
+            idx = oid_str.split(".")[-1]
+            wan_map[name] = {"index": idx, "link_up": False}
+
+    # Add status info
+    for oid_str, status_val in if_status_tree.items():
+        idx = oid_str.split(".")[-1]
+        status_code = int(status_val) if status_val else 0
+        for name, info in wan_map.items():
+            if info["index"] == idx:
+                info["link_up"] = (status_code == 1)
+
+    # Add traffic info
+    for oid_str, bytes_val in if_hc_in.items():
+        idx = oid_str.split(".")[-1]
+        for name, info in wan_map.items():
+            if info["index"] == idx:
+                info["rx_bytes"] = int(bytes_val) if bytes_val else 0
+
+    for oid_str, bytes_val in if_hc_out.items():
+        idx = oid_str.split(".")[-1]
+        for name, info in wan_map.items():
+            if info["index"] == idx:
+                info["tx_bytes"] = int(bytes_val) if bytes_val else 0
+
+    # Build output for Port2 and Port4
+    wan_config = {
+        "Port2": {"ip": "192.168.1.75", "gateway": "192.168.1.1"},
+        "Port4": {"ip": "192.168.37.6", "gateway": "192.168.37.1"}
+    }
+
+    for name, config in wan_config.items():
+        info = wan_map.get(name, {})
+        wans.append({
+            "name": f"WAN {name}",
+            "interface": name,
+            "ip": config["ip"],
+            "gateway": config["gateway"],
+            "link_up": info.get("link_up", False),
+            "internet_reachable": info.get("link_up", False),
+            "latency_ms": None,
+            "rx_bytes": info.get("rx_bytes", 0),
+            "tx_bytes": info.get("tx_bytes", 0)
+        })
+
+    return wans
+
+
+def _derive_wan_status(wans):
+    """Determine overall WAN status."""
+    if not wans:
+        return "critical"
+    up_count = sum(1 for w in wans if w.get("link_up"))
+    if up_count == len(wans):
+        return "ok"
+    elif up_count > 0:
+        return "warning"
+    else:
+        return "critical"
+
+
 def run_check(section_name, cfg, default_timeout):
     check_type = cfg.get("type", "http_json").strip().lower()
 
@@ -161,6 +345,8 @@ def run_check(section_name, cfg, default_timeout):
         return run_tcp_check(section_name, cfg, default_timeout)
     if check_type == "heartbeat_file":
         return run_heartbeat_check(section_name, cfg, default_timeout)
+    if check_type == "snmp_sophos":
+        return run_snmp_sophos_check(section_name, cfg, default_timeout)
 
     result = _base_result(section_name, cfg)
     return _finalize(result, time.perf_counter(), "unknown", f"Unsupported check type: {check_type}")
