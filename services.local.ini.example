@@ -12,7 +12,7 @@ request_timeout_seconds = 8
 [group:internet_edge]
 run_on = local
 label = Internet / WAN
-services = mirth_lab,mirth_dicom,orthanc_main
+services = sophos_firewall,mirth_lab,mirth_dicom,orthanc_main
 failure_condition = all_down
 severity = critical
 message = Likely internet, VPN, or upstream network issue
@@ -214,4 +214,18 @@ expected_status = 200
 slow_threshold_ms = 2000
 verify_ssl = 0
 header_x_requested_with = OpenAPI
+interval_seconds = 60
+
+# Sophos XG Firewall WAN monitoring
+[service:sophos_firewall]
+type = snmp_sophos
+enabled = 1
+run_on = local
+category = infrastructure
+label = Sophos XG106w WAN Status
+host = 192.168.134.1
+community = ENV:SOPHOS_SNMP_COMMUNITY
+version = 2c
+port = 161
+timeout_seconds = 8
 interval_seconds = 60
