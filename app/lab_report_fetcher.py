@@ -1,9 +1,11 @@
 import requests
+import configparser
 import os
 import time
 import hashlib
 import shutil
 from datetime import datetime
+from pathlib import Path
 from app.pdf_utils import validate_pdf, merge_pdfs
 import app.report_fetcher as report_fetcher
 from app.report_fetcher import (
@@ -21,6 +23,11 @@ from app.report_fetcher import (
 )
 from app.report_status import fetch_report_status, fetch_report_status_by_reqid
 
+config = configparser.ConfigParser()
+ROOT_DIR = Path(__file__).resolve().parents[1]
+config.read(ROOT_DIR / "config.ini")
+
+SHIVAM_BASE = str(config.get("api", "radiology_wordole_base", fallback="http://120.138.8.37:9999/shivam")).rstrip("/")
 COMBINED_CACHE_DIR = os.path.join(OUTPUT_DIR, "_combined_cache")
 
 
@@ -74,8 +81,9 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     Uses scheme_testid for schemes, null for individual tests without scheme.
     """
     report_fetcher.ensure_session()
+    print(f"[FETCH_SCHEME] Session established: {report_fetcher.session is not None}")
 
-    base_url = f"{report_fetcher.APP}/DgReportingVF"
+    base_url = f"{SHIVAM_BASE}/DgReportingVF"
     date_str = datetime.now().strftime("%d/%m/%Y")
 
     # Use scheme_testid if available, otherwise null (for ungrouped tests)
