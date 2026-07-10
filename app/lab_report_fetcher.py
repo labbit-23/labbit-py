@@ -118,9 +118,13 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
         raise Exception(f"Network error fetching {scheme_key}: {e}")
 
         content_type = response.headers.get("Content-Type", "")
-        print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
+        content = response.content or b""
+        print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(content)}")
 
-        if "application/pdf" not in content_type:
+        if not content:
+            raise Exception(f"Empty response from DgReportingVF for {scheme_key}")
+
+        if "application/pdf" not in content_type and not content.startswith(b"%PDF"):
             response_text = response.text or ""
             # Log full response for debugging
             print(f"[FETCH_SCHEME] Full response: {response_text[:500]}")
@@ -129,7 +133,7 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
         # Save PDF temporarily
         temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
         with open(temp_path, "wb") as f:
-            f.write(response.content)
+            f.write(content)
 
         if not validate_pdf(temp_path):
             raise Exception(f"Blank or invalid PDF for scheme {scheme_key}")
