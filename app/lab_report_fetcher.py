@@ -3,9 +3,10 @@ import os
 import time
 import hashlib
 import shutil
+from datetime import datetime
 from app.pdf_utils import validate_pdf, merge_pdfs
+import app.report_fetcher as report_fetcher
 from app.report_fetcher import (
-    download_report,
     _build_combined_cache_path,
     _is_recent_file,
     _acquire_key_lock,
@@ -16,6 +17,7 @@ from app.report_fetcher import (
     REPORT_LOCK_WAIT_SECONDS,
     REPORT_LOCK_POLL_SECONDS,
     OUTPUT_DIR,
+    HTTP_TIMEOUT_REPORT,
 )
 from app.report_status import fetch_report_status, fetch_report_status_by_reqid
 
@@ -40,7 +42,7 @@ def _fetch_per_test_status(reqid, reqno=None):
 def _filter_approved_lab_tests(tests):
     """
     Filter tests to only include approved lab tests (GROUPID=GDEP0001, APPROVEDFLG=1).
-    Returns list of approved lab test records.
+    Returns list of approved lab test records in original order.
     """
     return [
         t for t in tests
@@ -48,50 +50,86 @@ def _filter_approved_lab_tests(tests):
     ]
 
 
-def _group_by_scheme(tests):
+def _group_by_scheme_ordered(tests):
     """
-    Group approved lab tests by SCHEMEID.
-    Returns dict: {schemeid or testid: [test records]}
+    Group approved lab tests by SCHEMEID while preserving order.
+    Returns list of (scheme_key, [test records]) tuples in order of first appearance.
     For tests without SCHEMEID, use TESTID as the key.
     """
-    schemes = {}
+    seen = {}
+    ordered = []
     for test in tests:
         schemeid = test.get("SCHEMEID", "").strip()
         key = schemeid if schemeid else test.get("TESTID", "")
-        if key not in schemes:
-            schemes[key] = []
-        schemes[key].append(test)
-    return schemes
+        if key not in seen:
+            seen[key] = []
+            ordered.append(key)
+        seen[key].append(test)
+    return [(key, seen[key]) for key in ordered]
 
 
-def _fetch_scheme_report(reqid, scheme_key, tests, include_header=True, printtype="1", reqno=None):
+def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqno=None):
     """
-    Fetch report for a scheme or individual test.
-    For now, uses the standard download_report() with reqid.
-    Future: use scheme_testid parameter if DgReportingVF supports it.
+    Fetch PDF for a scheme or individual test using DgReportingVF.
+    Uses scheme_testid for schemes, null for individual tests without scheme.
     """
+    report_fetcher.ensure_session()
+
+    base_url = f"{report_fetcher.APP}/DgReportingVF"
+    date_str = datetime.now().strftime("%d/%m/%Y")
+
+    # Use scheme_testid if available, otherwise null (for ungrouped tests)
+    scheme_testid = scheme_key if (scheme_key.startswith("TS") or scheme_key == "") else "null"
+
+    # Use first test's TESTID as representative testid
+    first_testid = test_records[0].get("TESTID", "")
+
+    params = {
+        "scheme_testid": scheme_testid,
+        "chkrephead": "1" if include_header else "0",
+        "keyid": str(reqid).strip(),
+        "testid": str(first_testid).strip(),
+        "ptype": "null",
+        "calledfrom": "0",
+        "formid": "wf145",
+        "transid": "TR12",
+        "fromdt": date_str,
+        "todt": date_str,
+    }
+
+    if reqno:
+        params["reqno"] = str(reqno).strip()
+
     try:
-        path = download_report(
-            reqid=reqid,
-            include_header=include_header,
-            printtype=printtype,
-            reqno=reqno
-        )
-        return path
+        response = report_fetcher.session.get(base_url, params=params, timeout=HTTP_TIMEOUT_REPORT)
+
+        if "application/pdf" not in response.headers.get("Content-Type", ""):
+            raise Exception(f"Not a PDF response for scheme {scheme_key}")
+
+        # Save PDF temporarily
+        temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
+        with open(temp_path, "wb") as f:
+            f.write(response.content)
+
+        if not validate_pdf(temp_path):
+            raise Exception(f"Blank or invalid PDF for scheme {scheme_key}")
+
+        return temp_path
     except Exception as e:
-        raise Exception(f"Failed to fetch report for scheme {scheme_key}: {e}") from e
+        raise Exception(f"Failed to fetch scheme {scheme_key}: {e}") from e
 
 
 def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=None):
     """
-    Fetch and collate lab reports based on per-test status.
+    Fetch and collate lab reports using scheme-wise extraction.
 
     Logic:
     1. Query per-test status API to get approved lab tests with SCHEMEID
     2. Filter for approved lab tests only (GROUPID=GDEP0001, APPROVEDFLG=1)
-    3. Group by SCHEMEID (or individual TESTID if no scheme)
-    4. Fetch report for entire requisition (all approved lab tests together)
-    5. Cache and return combined PDF path
+    3. Group by SCHEMEID, preserving order from status API
+    4. For each scheme/test: fetch PDF using DgReportingVF(scheme_testid=...)
+    5. Merge all PDFs in order
+    6. Cache and return combined PDF path
     """
     ensure_output_dir()
 
@@ -117,6 +155,7 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
     except TimeoutError:
         lock_fd = None
 
+    temp_pdfs = []
     try:
         if _is_recent_file(cache_path, meta_path, REPORT_REUSE_WINDOW_SECONDS):
             return cache_path
@@ -124,28 +163,52 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
         # Fetch per-test status
         tests = _fetch_per_test_status(reqid, reqno)
 
-        # Filter to approved lab tests only
+        # Filter to approved lab tests only (preserves order)
         approved_lab_tests = _filter_approved_lab_tests(tests)
 
         if not approved_lab_tests:
             raise Exception("No approved lab tests found")
 
-        # For now: fetch entire lab report (all approved tests together)
-        # TODO: Later implement scheme-wise extraction when DgReportingVF supports scheme_testid
-        lab_path = download_report(
-            reqid=reqid,
-            include_header=include_header,
-            printtype=printtype,
-            reqno=reqno
-        )
+        # Group by scheme, preserving order of first appearance
+        schemes_ordered = _group_by_scheme_ordered(approved_lab_tests)
 
-        # Cache and return
-        shutil.copyfile(lab_path, cache_path)
+        # Fetch PDF for each scheme/test
+        for scheme_key, test_records in schemes_ordered:
+            try:
+                pdf_path = _fetch_scheme_pdf(
+                    reqid=reqid,
+                    scheme_key=scheme_key,
+                    test_records=test_records,
+                    include_header=include_header,
+                    reqno=reqno
+                )
+                temp_pdfs.append(pdf_path)
+            except Exception as e:
+                print(f"Warning: failed to fetch scheme {scheme_key}: {e}")
+                # Continue fetching other schemes instead of failing completely
+
+        if not temp_pdfs:
+            raise Exception("Failed to fetch any lab report PDFs")
+
+        # Merge PDFs if multiple, or copy if single
+        if len(temp_pdfs) == 1:
+            shutil.copyfile(temp_pdfs[0], cache_path)
+        else:
+            merge_pdfs(temp_pdfs, cache_path)
+
         _write_cache_metadata(meta_path)
         return cache_path
 
     except requests.RequestException as exc:
         raise Exception(f"UPSTREAM_REQUEST_FAILED: {exc}") from exc
     finally:
+        # Cleanup temp PDFs
+        for pdf_path in temp_pdfs:
+            try:
+                if os.path.exists(pdf_path):
+                    os.unlink(pdf_path)
+            except Exception:
+                pass
+
         if lock_fd is not None:
             _release_key_lock(lock_fd, lock_path)
