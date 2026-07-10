@@ -221,8 +221,11 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
                     include_header=include_header,
                     reqno=reqno
                 )
-                print(f"[LAB_REPORT] Successfully fetched scheme {scheme_key}: {pdf_path}")
-                temp_pdfs.append(pdf_path)
+                if pdf_path is None:
+                    print(f"[LAB_REPORT] WARNING: _fetch_scheme_pdf returned None for {scheme_key}")
+                else:
+                    print(f"[LAB_REPORT] Successfully fetched scheme {scheme_key}: {pdf_path}")
+                    temp_pdfs.append(pdf_path)
             except Exception as e:
                 error_msg = str(e)[:100]
                 print(f"[LAB_REPORT] ERROR: failed to fetch scheme {scheme_key}: {error_msg}")
