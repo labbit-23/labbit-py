@@ -145,7 +145,7 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
         raise Exception(f"Failed to fetch scheme {scheme_key}: {e}") from e
 
 
-def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=None):
+def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=None, testid_filter=None):
     """
     Fetch and collate lab reports using scheme-wise extraction.
 
@@ -209,6 +209,11 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
         # Filter to approved lab tests only (preserves order)
         approved_lab_tests = _filter_approved_lab_tests(tests)
         print(f"[LAB_REPORT] After filtering: {len(approved_lab_tests)} approved lab tests")
+
+        # Filter to specific testids if provided
+        if testid_filter:
+            approved_lab_tests = [t for t in approved_lab_tests if t.get("TESTID") in testid_filter]
+            print(f"[LAB_REPORT] After testid filter: {len(approved_lab_tests)} tests")
 
         if not approved_lab_tests:
             print("[LAB_REPORT] ERROR: No approved lab tests found after filtering")

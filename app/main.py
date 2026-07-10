@@ -463,7 +463,8 @@ def lab_collated_report(
     printtype: str = Query(default="1"),
     chkrephead: Optional[str] = Query(default=None),
     header_mode: str = Query(default="default"),
-    without_header_background: Optional[str] = Query(default=None)
+    without_header_background: Optional[str] = Query(default=None),
+    testids: Optional[str] = Query(default=None)
 ):
     try:
         plain = _resolve_plain_mode(
@@ -474,11 +475,17 @@ def lab_collated_report(
 
         _require_dispatch_allowed(reqid=reqid, reqno=reqno)
 
+        # Parse testids if provided (comma-separated)
+        testid_list = None
+        if testids:
+            testid_list = [t.strip() for t in testids.split(",") if t.strip()]
+
         path = get_lab_collated_report(
             reqid,
             include_header=not plain,
             printtype=printtype,
-            reqno=reqno
+            reqno=reqno,
+            testid_filter=testid_list
         )
 
         return FileResponse(
