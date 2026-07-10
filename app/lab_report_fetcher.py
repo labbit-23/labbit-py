@@ -41,7 +41,7 @@ def _filter_approved_lab_tests(tests):
     """
     return [
         t for t in tests
-        if t.get("GROUPID") == "GDEP0001" and t.get("APPROVEDFLG") == 1
+        if t.get("GROUPID") == "GDEP0001" and str(t.get("APPROVEDFLG", "")).strip() == "1"
     ]
 
 
