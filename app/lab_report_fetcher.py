@@ -84,6 +84,10 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     # Use first test's TESTID as representative testid
     first_testid = test_records[0].get("TESTID", "")
 
+    # Debug: show what we're sending
+    print(f"[FETCH_SCHEME] scheme_key={scheme_key}, scheme_testid={scheme_testid}, first_testid={first_testid}")
+    print(f"[FETCH_SCHEME] test_records count={len(test_records)}, first record keys={list(test_records[0].keys())}")
+
     # Build query string like outsourced_report_fetcher does
     query = (
         f"scheme_testid={scheme_testid}&chkrephead={'1' if include_header else '0'}"
@@ -104,8 +108,10 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
         print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
 
         if "application/pdf" not in content_type:
-            response_preview = (response.text or "")[:1000]
-            raise Exception(f"Not a PDF response for scheme {scheme_key}: status={response.status_code}, preview={response_preview}")
+            response_text = response.text or ""
+            # Log full response for debugging
+            print(f"[FETCH_SCHEME] Full response: {response_text[:500]}")
+            raise Exception(f"DgReportingVF error: {response_text[:200]}")
 
         # Save PDF temporarily
         temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
