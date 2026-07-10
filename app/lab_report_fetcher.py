@@ -227,11 +227,10 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
                     print(f"[LAB_REPORT] Successfully fetched scheme {scheme_key}: {pdf_path}")
                     temp_pdfs.append(pdf_path)
             except Exception as e:
-                error_msg = str(e)[:100]
+                error_msg = str(e)
                 print(f"[LAB_REPORT] ERROR: failed to fetch scheme {scheme_key}: {error_msg}")
-                # Store error for debugging if all schemes fail
-                if not hasattr(get_lab_collated_report, '_last_scheme_error'):
-                    get_lab_collated_report._last_scheme_error = error_msg
+                # Store last error for debugging
+                get_lab_collated_report._last_scheme_error = error_msg
                 # Continue fetching other schemes instead of failing completely
 
         if not temp_pdfs:
