@@ -84,25 +84,21 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     # Use first test's TESTID as representative testid
     first_testid = test_records[0].get("TESTID", "")
 
-    params = {
-        "scheme_testid": scheme_testid,
-        "chkrephead": "1" if include_header else "0",
-        "keyid": str(reqid).strip(),
-        "testid": str(first_testid).strip(),
-        "ptype": "null",
-        "calledfrom": "0",
-        "formid": "wf145",
-        "transid": "TR12",
-        "fromdt": date_str,
-        "todt": date_str,
-    }
+    # Build query string like outsourced_report_fetcher does
+    query = (
+        f"scheme_testid={scheme_testid}&chkrephead={'1' if include_header else '0'}"
+        f"&keyid={str(reqid).strip()}&testid={str(first_testid).strip()}"
+        f"&ptype=null&calledfrom=0&formid=wf145&transid=TR12&fromdt={date_str}&todt={date_str}"
+    )
 
     if reqno:
-        params["reqno"] = str(reqno).strip()
+        query += f"&reqno={str(reqno).strip()}"
+
+    url = f"{base_url}?{query}"
 
     try:
-        print(f"Fetching from DgReportingVF with params: scheme_testid={params.get('scheme_testid')}, testid={params.get('testid')}")
-        response = report_fetcher.session.get(base_url, params=params, timeout=HTTP_TIMEOUT_REPORT)
+        print(f"Fetching from DgReportingVF: scheme_testid={scheme_testid}, testid={first_testid}")
+        response = report_fetcher.session.get(url, timeout=HTTP_TIMEOUT_REPORT)
 
         content_type = response.headers.get("Content-Type", "")
         print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
