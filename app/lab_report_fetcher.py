@@ -199,12 +199,18 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
                 print(f"[LAB_REPORT] Successfully fetched scheme {scheme_key}: {pdf_path}")
                 temp_pdfs.append(pdf_path)
             except Exception as e:
-                print(f"[LAB_REPORT] ERROR: failed to fetch scheme {scheme_key}: {e}")
+                error_msg = str(e)[:100]
+                print(f"[LAB_REPORT] ERROR: failed to fetch scheme {scheme_key}: {error_msg}")
+                # Store error for debugging if all schemes fail
+                if not hasattr(get_lab_collated_report, '_last_scheme_error'):
+                    get_lab_collated_report._last_scheme_error = error_msg
                 # Continue fetching other schemes instead of failing completely
 
         if not temp_pdfs:
-            print("[LAB_REPORT] ERROR: Failed to fetch any lab report PDFs")
-            raise Exception("Failed to fetch any lab report PDFs")
+            last_error = getattr(get_lab_collated_report, '_last_scheme_error', 'unknown')
+            debug_info = f"Tried to fetch {len(schemes_ordered)} schemes but all failed. Last error: {last_error}"
+            print(f"[LAB_REPORT] ERROR: {debug_info}")
+            raise Exception(f"Failed to fetch any lab report PDFs ({debug_info})")
 
         # Merge PDFs if multiple, or copy if single
         print(f"[LAB_REPORT] Merging {len(temp_pdfs)} PDF(s)")
