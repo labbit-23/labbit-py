@@ -192,8 +192,20 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
 
         # Fetch per-test status
         print(f"[LAB_REPORT] Fetching status for reqid={reqid}, reqno={reqno}")
-        tests = _fetch_per_test_status(reqid, reqno)
+
+        # Get full status to extract reqno if needed
+        if reqno:
+            status = fetch_report_status(reqno)
+        else:
+            status = fetch_report_status_by_reqid(reqid)
+
+        tests = status.get("tests", []) if status else []
         print(f"[LAB_REPORT] Status API returned {len(tests)} tests")
+
+        # Ensure we have reqno for DgReportingVF (needed for print counter update)
+        if not reqno and status:
+            reqno = status.get("reqno", "")
+            print(f"[LAB_REPORT] Extracted reqno from status: {reqno}")
 
         # Filter to approved lab tests only (preserves order)
         approved_lab_tests = _filter_approved_lab_tests(tests)
