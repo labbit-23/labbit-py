@@ -162,30 +162,33 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
 
     temp_pdfs = []
     try:
+        print(f"[LAB_REPORT] Starting: reqid={reqid}, reqno={reqno}")
+
         if _is_recent_file(cache_path, meta_path, REPORT_REUSE_WINDOW_SECONDS):
+            print(f"[LAB_REPORT] Using cached result")
             return cache_path
 
         # Fetch per-test status
-        print(f"Fetching status for reqid={reqid}, reqno={reqno}")
+        print(f"[LAB_REPORT] Fetching status for reqid={reqid}, reqno={reqno}")
         tests = _fetch_per_test_status(reqid, reqno)
-        print(f"Status API returned {len(tests)} tests")
+        print(f"[LAB_REPORT] Status API returned {len(tests)} tests")
 
         # Filter to approved lab tests only (preserves order)
         approved_lab_tests = _filter_approved_lab_tests(tests)
-        print(f"After filtering: {len(approved_lab_tests)} approved lab tests")
+        print(f"[LAB_REPORT] After filtering: {len(approved_lab_tests)} approved lab tests")
 
         if not approved_lab_tests:
-            print("ERROR: No approved lab tests found after filtering")
+            print("[LAB_REPORT] ERROR: No approved lab tests found after filtering")
             raise Exception("No approved lab tests found")
 
         # Group by scheme, preserving order of first appearance
         schemes_ordered = _group_by_scheme_ordered(approved_lab_tests)
-        print(f"Grouped into {len(schemes_ordered)} schemes/test groups")
+        print(f"[LAB_REPORT] Grouped into {len(schemes_ordered)} schemes/test groups")
 
         # Fetch PDF for each scheme/test
         for scheme_key, test_records in schemes_ordered:
             try:
-                print(f"Fetching scheme {scheme_key} with {len(test_records)} tests")
+                print(f"[LAB_REPORT] Fetching scheme {scheme_key} with {len(test_records)} tests")
                 pdf_path = _fetch_scheme_pdf(
                     reqid=reqid,
                     scheme_key=scheme_key,
@@ -193,26 +196,30 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
                     include_header=include_header,
                     reqno=reqno
                 )
-                print(f"Successfully fetched scheme {scheme_key}: {pdf_path}")
+                print(f"[LAB_REPORT] Successfully fetched scheme {scheme_key}: {pdf_path}")
                 temp_pdfs.append(pdf_path)
             except Exception as e:
-                print(f"ERROR: failed to fetch scheme {scheme_key}: {e}")
+                print(f"[LAB_REPORT] ERROR: failed to fetch scheme {scheme_key}: {e}")
                 # Continue fetching other schemes instead of failing completely
 
         if not temp_pdfs:
+            print("[LAB_REPORT] ERROR: Failed to fetch any lab report PDFs")
             raise Exception("Failed to fetch any lab report PDFs")
 
         # Merge PDFs if multiple, or copy if single
+        print(f"[LAB_REPORT] Merging {len(temp_pdfs)} PDF(s)")
         if len(temp_pdfs) == 1:
             shutil.copyfile(temp_pdfs[0], cache_path)
         else:
             merge_pdfs(temp_pdfs, cache_path)
 
         _write_cache_metadata(meta_path)
+        print(f"[LAB_REPORT] Success: {cache_path}")
         return cache_path
 
-    except requests.RequestException as exc:
-        raise Exception(f"UPSTREAM_REQUEST_FAILED: {exc}") from exc
+    except Exception as exc:
+        print(f"[LAB_REPORT] EXCEPTION: {exc}")
+        raise Exception(f"REPORT_FETCH_FAILED: {exc}") from exc
     finally:
         # Cleanup temp PDFs
         for pdf_path in temp_pdfs:
