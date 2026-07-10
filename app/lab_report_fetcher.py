@@ -237,12 +237,24 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
             print(f"[LAB_REPORT] ERROR: {debug_info}")
             raise Exception(f"Failed to fetch any lab report PDFs ({debug_info})")
 
+        # Verify all temp PDFs exist and have content
+        for pdf_path in temp_pdfs:
+            if not os.path.exists(pdf_path):
+                raise Exception(f"PDF file missing: {pdf_path}")
+            size = os.path.getsize(pdf_path)
+            if size < 100:
+                raise Exception(f"PDF file too small ({size} bytes): {pdf_path}")
+            print(f"[LAB_REPORT] Verified PDF: {os.path.basename(pdf_path)} ({size} bytes)")
+
         # Merge PDFs if multiple, or copy if single
         print(f"[LAB_REPORT] Merging {len(temp_pdfs)} PDF(s)")
-        if len(temp_pdfs) == 1:
-            shutil.copyfile(temp_pdfs[0], cache_path)
-        else:
-            merge_pdfs(temp_pdfs, cache_path)
+        try:
+            if len(temp_pdfs) == 1:
+                shutil.copyfile(temp_pdfs[0], cache_path)
+            else:
+                merge_pdfs(temp_pdfs, cache_path)
+        except Exception as e:
+            raise Exception(f"Failed to merge/copy PDFs: {e}") from e
 
         _write_cache_metadata(meta_path)
         print(f"[LAB_REPORT] Success: {cache_path}")
