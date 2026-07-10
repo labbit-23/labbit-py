@@ -112,10 +112,6 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     try:
         print(f"DgReportingVF URL: {url}")
         response = report_fetcher.session.get(url, timeout=HTTP_TIMEOUT_REPORT, allow_redirects=True)
-    except requests.exceptions.Timeout:
-        raise Exception(f"Timeout fetching {scheme_key} from DgReportingVF")
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Network error fetching {scheme_key}: {e}")
 
         content_type = response.headers.get("Content-Type", "")
         content = response.content or b""
@@ -126,25 +122,26 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
 
         if "application/pdf" not in content_type and not content.startswith(b"%PDF"):
             response_text = response.text or ""
-            # Log full response for debugging
             print(f"[FETCH_SCHEME] Full response: {response_text[:500]}")
             raise Exception(f"DgReportingVF error: {response_text[:200]}")
 
         # Save PDF temporarily
         temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
-        try:
-            with open(temp_path, "wb") as f:
-                f.write(content)
-        except Exception as e:
-            raise Exception(f"Failed to write PDF file: {e}")
+        with open(temp_path, "wb") as f:
+            f.write(content)
 
-        # Check file size (basic validation without validate_pdf which may fail)
+        # Check file size
         file_size = os.path.getsize(temp_path)
         if file_size < 1000:
             raise Exception(f"PDF file too small ({file_size} bytes) for scheme {scheme_key}")
 
         print(f"[FETCH_SCHEME] Saved {file_size} bytes to {temp_path}")
         return temp_path
+
+    except requests.exceptions.Timeout:
+        raise Exception(f"Timeout fetching {scheme_key} from DgReportingVF")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error fetching {scheme_key}: {e}")
     except Exception as e:
         raise Exception(f"Failed to fetch scheme {scheme_key}: {e}") from e
 
