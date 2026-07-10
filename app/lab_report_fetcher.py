@@ -101,14 +101,15 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
         params["reqno"] = str(reqno).strip()
 
     try:
+        print(f"Fetching from DgReportingVF with params: scheme_testid={params.get('scheme_testid')}, testid={params.get('testid')}")
         response = report_fetcher.session.get(base_url, params=params, timeout=HTTP_TIMEOUT_REPORT)
 
         content_type = response.headers.get("Content-Type", "")
-        print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}")
+        print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
 
         if "application/pdf" not in content_type:
-            response_preview = (response.text or "")[:200]
-            raise Exception(f"Not a PDF response for scheme {scheme_key}: {response_preview}")
+            response_preview = (response.text or "")[:500]
+            raise Exception(f"Not a PDF response for scheme {scheme_key}: status={response.status_code}, preview={response_preview}")
 
         # Save PDF temporarily
         temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
