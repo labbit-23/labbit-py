@@ -103,8 +103,12 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     try:
         response = report_fetcher.session.get(base_url, params=params, timeout=HTTP_TIMEOUT_REPORT)
 
-        if "application/pdf" not in response.headers.get("Content-Type", ""):
-            raise Exception(f"Not a PDF response for scheme {scheme_key}")
+        content_type = response.headers.get("Content-Type", "")
+        print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}")
+
+        if "application/pdf" not in content_type:
+            response_preview = (response.text or "")[:200]
+            raise Exception(f"Not a PDF response for scheme {scheme_key}: {response_preview}")
 
         # Save PDF temporarily
         temp_path = os.path.join(OUTPUT_DIR, f"{reqid}_{scheme_key}_temp.pdf")
@@ -175,6 +179,7 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
         # Fetch PDF for each scheme/test
         for scheme_key, test_records in schemes_ordered:
             try:
+                print(f"Fetching scheme {scheme_key} with {len(test_records)} tests")
                 pdf_path = _fetch_scheme_pdf(
                     reqid=reqid,
                     scheme_key=scheme_key,
@@ -182,9 +187,10 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
                     include_header=include_header,
                     reqno=reqno
                 )
+                print(f"Successfully fetched scheme {scheme_key}: {pdf_path}")
                 temp_pdfs.append(pdf_path)
             except Exception as e:
-                print(f"Warning: failed to fetch scheme {scheme_key}: {e}")
+                print(f"ERROR: failed to fetch scheme {scheme_key}: {e}")
                 # Continue fetching other schemes instead of failing completely
 
         if not temp_pdfs:
