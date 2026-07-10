@@ -89,8 +89,9 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     print(f"[FETCH_SCHEME] test_records count={len(test_records)}, first record keys={list(test_records[0].keys())}")
 
     # Build query string like outsourced_report_fetcher does
+    # Start without header (chkrephead=0) to avoid null pointer on header generation
     query = (
-        f"scheme_testid={scheme_testid}&chkrephead={'1' if include_header else '0'}"
+        f"scheme_testid={scheme_testid}&chkrephead=0"
         f"&keyid={str(reqid).strip()}&testid={str(first_testid).strip()}"
         f"&ptype=null&calledfrom=0&formid=wf145&transid=TR12&fromdt={date_str}&todt={date_str}"
     )
@@ -103,6 +104,10 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
     try:
         print(f"DgReportingVF URL: {url}")
         response = report_fetcher.session.get(url, timeout=HTTP_TIMEOUT_REPORT, allow_redirects=True)
+    except requests.exceptions.Timeout:
+        raise Exception(f"Timeout fetching {scheme_key} from DgReportingVF")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Network error fetching {scheme_key}: {e}")
 
         content_type = response.headers.get("Content-Type", "")
         print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
