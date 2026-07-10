@@ -102,7 +102,7 @@ def _fetch_scheme_pdf(reqid, scheme_key, test_records, include_header=True, reqn
 
     try:
         print(f"DgReportingVF URL: {url}")
-        response = report_fetcher.session.get(url, timeout=HTTP_TIMEOUT_REPORT)
+        response = report_fetcher.session.get(url, timeout=HTTP_TIMEOUT_REPORT, allow_redirects=True)
 
         content_type = response.headers.get("Content-Type", "")
         print(f"DgReportingVF response for {scheme_key}: status={response.status_code}, content_type={content_type[:80]}, content_length={len(response.content)}")
