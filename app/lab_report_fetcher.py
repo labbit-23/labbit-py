@@ -17,18 +17,21 @@ from app.report_fetcher import (
     REPORT_LOCK_POLL_SECONDS,
     OUTPUT_DIR,
 )
-from app.report_status import fetch_report_status
+from app.report_status import fetch_report_status, fetch_report_status_by_reqid
 
 COMBINED_CACHE_DIR = os.path.join(OUTPUT_DIR, "_combined_cache")
 
 
-def _fetch_per_test_status(reqno):
+def _fetch_per_test_status(reqid, reqno=None):
     """
     Fetch per-test status from the status API.
     Returns list of test records with SCHEMEID, APPROVEDFLG, GROUPID, etc.
     """
     try:
-        status = fetch_report_status(reqno)
+        if reqno:
+            status = fetch_report_status(reqno)
+        else:
+            status = fetch_report_status_by_reqid(reqid)
         return status.get("tests", []) if status else []
     except Exception as e:
         raise Exception(f"Failed to fetch test status: {e}") from e
@@ -119,7 +122,7 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
             return cache_path
 
         # Fetch per-test status
-        tests = _fetch_per_test_status(reqno or reqid)
+        tests = _fetch_per_test_status(reqid, reqno)
 
         # Filter to approved lab tests only
         approved_lab_tests = _filter_approved_lab_tests(tests)
