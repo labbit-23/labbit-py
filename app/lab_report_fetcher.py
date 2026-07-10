@@ -159,8 +159,10 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
     """
     ensure_output_dir()
 
+    # Include testid_filter in cache key so filtered reports have different cache
+    cache_suffix = f"_testids_{'_'.join(sorted(testid_filter)) if testid_filter else 'all'}"
     cache_path, meta_path = _build_combined_cache_path(
-        reqid=reqid,
+        reqid=reqid + cache_suffix,
         include_header=include_header,
         apply_radiology_background=False,
         printtype=printtype,
