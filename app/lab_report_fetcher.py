@@ -166,16 +166,21 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
             return cache_path
 
         # Fetch per-test status
+        print(f"Fetching status for reqid={reqid}, reqno={reqno}")
         tests = _fetch_per_test_status(reqid, reqno)
+        print(f"Status API returned {len(tests)} tests")
 
         # Filter to approved lab tests only (preserves order)
         approved_lab_tests = _filter_approved_lab_tests(tests)
+        print(f"After filtering: {len(approved_lab_tests)} approved lab tests")
 
         if not approved_lab_tests:
+            print("ERROR: No approved lab tests found after filtering")
             raise Exception("No approved lab tests found")
 
         # Group by scheme, preserving order of first appearance
         schemes_ordered = _group_by_scheme_ordered(approved_lab_tests)
+        print(f"Grouped into {len(schemes_ordered)} schemes/test groups")
 
         # Fetch PDF for each scheme/test
         for scheme_key, test_records in schemes_ordered:
