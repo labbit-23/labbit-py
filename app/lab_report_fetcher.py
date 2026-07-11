@@ -208,9 +208,9 @@ def get_lab_collated_report(reqid, include_header=True, printtype="1", reqno=Non
             reqno = status.get("reqno", "")
             print(f"[LAB_REPORT] Extracted reqno from status: {reqno}")
 
-        # Filter to approved lab tests only (preserves order)
-        approved_lab_tests = _filter_approved_lab_tests(tests)
-        print(f"[LAB_REPORT] After filtering: {len(approved_lab_tests)} approved lab tests")
+        # Filter to approved tests (all groups: lab, radiology, etc.) to test cross-group extraction
+        approved_lab_tests = [t for t in tests if str(t.get("APPROVEDFLG", "")).strip() == "1"]
+        print(f"[LAB_REPORT] After filtering: {len(approved_lab_tests)} approved tests (all groups)")
 
         # Filter to specific testids if provided
         if testid_filter:
