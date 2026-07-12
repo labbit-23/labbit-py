@@ -381,6 +381,9 @@ def radiology_report(
             header_mode=header_mode,
             without_header_background=without_header_background
         )
+
+        _require_dispatch_allowed(reqid=reqid)
+
         path = get_radiology_report(reqid, apply_background_overlay=not plain)
 
         return FileResponse(
