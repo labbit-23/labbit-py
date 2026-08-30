@@ -21,7 +21,7 @@ from app.report_fetcher import (
     OUTPUT_DIR,
     HTTP_TIMEOUT_REPORT,
 )
-from app.report_status import fetch_report_status, fetch_report_status_by_reqid
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]

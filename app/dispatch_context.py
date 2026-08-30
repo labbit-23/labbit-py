@@ -1,4 +1,4 @@
-from app.report_status import fetch_report_status
+from app.report_backend import fetch_report_status
 from app.outsourced_report_fetcher import classify_outsourced_report
 
 

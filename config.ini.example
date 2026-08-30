@@ -87,3 +87,23 @@ logo_width_pt = 120
 # 1 => resolve radiology filename via DgWordoleVF on :9999 first, then fetch PDF from wordimages
 # 0 => keep legacy static wordimages fetch
 use_wordole_resolver = 0
+
+
+[cutover]
+# User, 2026-08-30: "if we do deploy labit-py again, it shouldnt start
+# seeking labit core endpoints but wait for a cutover setting in its
+# config." This is that setting -- app/report_backend.py reads it and,
+# when false (the default), does NOT attempt a labit-core call at all for
+# report-status lookups -- goes straight to Shivam/TApiQuery, same as
+# before report_backend.py existed. main.py's import can safely point at
+# report_backend ahead of time; THIS flag, not the import line, is the
+# actual cutover-night switch. Flip to true only at the actual cutover
+# moment, then restart the process -- no code/git change needed that
+# night.
+report_status_use_labit_core = false
+# Base URL + service credentials for labit-core, read by app/labit_tools.py
+# ONLY when the flag above is true. Real credentials belong in the live,
+# gitignored config.ini on the server -- never commit them here.
+labit_core_base_url =
+labit_core_service_username =
+labit_core_service_password =

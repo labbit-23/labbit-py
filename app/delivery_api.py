@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 
-from app.report_status import fetch_report_status
+from app.report_backend import fetch_report_status
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]

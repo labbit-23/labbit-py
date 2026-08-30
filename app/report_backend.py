@@ -20,17 +20,38 @@ or wrong status for something labit-core actually knows about but just
 failed to answer right now. It raises loudly instead, exactly as either
 backend would on its own.
 
-The actual cutover-night switch is a one-line change in main.py: import
-`fetch_report_status`/`fetch_report_status_by_reqid` from here instead of
-from `app.report_status` directly. Nothing else in the codebase needs to
-change, and nothing else needs to know which backend answered.
+User, 2026-08-30 (safety requirement): "if we do deploy labit-py again, it
+shouldnt start seeking labit core endpoints but wait for a cutover setting
+in its config." `main.py`'s import line is deliberately NOT the switch --
+it can safely point here ahead of any actual cutover, because THIS module
+reads config.ini's `[cutover] report_status_use_labit_core` flag
+(default: false) and, while it's false, never attempts a labit-core call
+at all -- goes straight to Shivam, identical to calling report_status.py
+directly. A routine redeploy before the real cutover moment is therefore
+inert. The actual cutover-night switch is flipping that ONE config value
+and restarting the process -- no code or git change needed that night.
 """
+
+import configparser
+from pathlib import Path
 
 from app import labit_tools, report_status
 from app.labit_tools import LabitCoreReportNotFound
 
+config = configparser.ConfigParser()
+ROOT_DIR = Path(__file__).resolve().parents[1]
+config.read(ROOT_DIR / "config.ini")
+
+
+def _labit_core_enabled() -> bool:
+    if not config.has_section("cutover"):
+        return False
+    return config["cutover"].getboolean("report_status_use_labit_core", fallback=False)
+
 
 def fetch_report_status(reqno):
+    if not _labit_core_enabled():
+        return report_status.fetch_report_status(reqno)
     try:
         return labit_tools.fetch_report_status(reqno)
     except LabitCoreReportNotFound:
@@ -38,6 +59,8 @@ def fetch_report_status(reqno):
 
 
 def fetch_report_status_by_reqid(reqid):
+    if not _labit_core_enabled():
+        return report_status.fetch_report_status_by_reqid(reqid)
     try:
         return labit_tools.fetch_report_status_by_reqid(reqid)
     except LabitCoreReportNotFound:

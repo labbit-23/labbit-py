@@ -28,18 +28,34 @@ caller reading individual fields, not diffing the whole dict shape.
 Auth: unlike TApiQuery (no login, just a terminalid query param), labit-core
 gates this on `require_service()` (HTTP Basic, the same `svc_dispatch_bot`
 credential labit-deliver already uses for its own calls into labit-core).
-Read from environment, never hardcoded/committed -- same posture the
-readiness doc itself calls for ("given to the user once, never in this
-repo").
+Read from config.ini's `[cutover]` section (gitignored, same as every
+other credential in this file -- `[login] password`, `[whatsapp]
+whatsapp_api_key`), with an environment-variable override for convenience
+-- never hardcoded/committed, same posture the readiness doc itself calls
+for ("given to the user once, never in this repo").
 """
 
+import configparser
 import os
+from pathlib import Path
 
 import requests
 
-LABIT_CORE_BASE_URL = os.environ.get("LABIT_CORE_BASE_URL", "").rstrip("/")
-LABIT_CORE_SERVICE_USERNAME = os.environ.get("LABIT_CORE_SERVICE_USERNAME", "")
-LABIT_CORE_SERVICE_PASSWORD = os.environ.get("LABIT_CORE_SERVICE_PASSWORD", "")
+config = configparser.ConfigParser()
+ROOT_DIR = Path(__file__).resolve().parents[1]
+config.read(ROOT_DIR / "config.ini")
+
+LABIT_CORE_BASE_URL = os.environ.get(
+    "LABIT_CORE_BASE_URL", config["cutover"].get("labit_core_base_url", "") if config.has_section("cutover") else ""
+).rstrip("/")
+LABIT_CORE_SERVICE_USERNAME = os.environ.get(
+    "LABIT_CORE_SERVICE_USERNAME",
+    config["cutover"].get("labit_core_service_username", "") if config.has_section("cutover") else "",
+)
+LABIT_CORE_SERVICE_PASSWORD = os.environ.get(
+    "LABIT_CORE_SERVICE_PASSWORD",
+    config["cutover"].get("labit_core_service_password", "") if config.has_section("cutover") else "",
+)
 
 
 def _auth():

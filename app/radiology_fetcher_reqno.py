@@ -3,7 +3,8 @@ import requests
 import subprocess
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
-from app.report_status import fetch_report_status, row_value
+from app.report_backend import fetch_report_status
+from app.report_status import row_value
 
 # -----------------------------
 # CONFIG

@@ -9,7 +9,7 @@ from pypdf import PdfReader
 
 import app.report_fetcher as report_fetcher
 from app.attachment_fetcher import fetch_attachment
-from app.report_status import fetch_report_status_by_reqid
+from app.report_backend import fetch_report_status_by_reqid
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 config = configparser.ConfigParser()
