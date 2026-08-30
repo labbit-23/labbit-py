@@ -102,6 +102,16 @@ def fetch_report_status_by_reqid(reqid):
     return _get(f"/api/report-status-reqid/{reqid}")
 
 
+def fetch_lookup(phone):
+    """Drop-in replacement for req_lookup.fetch_reqids(phone) -- labit-core's
+    /api/dispatch-lookup/{phone} already merges labit_core + shivam_archive
+    rows (2026-08-30: closed the one gap left after status/PDF/trend all
+    got the same treatment -- /lookup/{phone} is the bot's primary "find my
+    reports" entry point). Returns the raw {"phone", "latest_reports", ...}
+    payload; report_backend.fetch_lookup adapts the shape for main.py."""
+    return _get(f"/api/dispatch-lookup/{phone}")
+
+
 def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
     """Drop-in replacement for report_fetcher.get_report()-family calls --
     labit-core's /api/dispatch-status/{reqno}/pdf now black-boxes core vs

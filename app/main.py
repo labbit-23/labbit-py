@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_combined_report_path
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_combined_report_path, fetch_lookup
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -357,12 +357,10 @@ def health():
 # -----------------------------
 @app.get("/lookup/{phone}")
 def lookup(phone):
-
-    rows = fetch_reqids(phone)
-
+    result = fetch_lookup(phone)
     return {
         "phone": phone,
-        "latest_reports": rows
+        "latest_reports": result.get("latest_reports", [])
     }
 
 

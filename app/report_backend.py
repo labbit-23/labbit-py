@@ -36,7 +36,7 @@ import configparser
 import tempfile
 from pathlib import Path
 
-from app import labit_tools, report_status, trends_data_api
+from app import labit_tools, report_status, req_lookup, trends_data_api
 from app.labit_tools import LabitCoreReportNotFound
 
 config = configparser.ConfigParser()
@@ -109,6 +109,21 @@ def fetch_combined_report_path(reqid, get_combined_report_fn, *, reqno=None, inc
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(pdf_bytes)
         return tmp.name
+
+
+def fetch_lookup(phone):
+    """User, 2026-08-30: closing the last gap flagged in "are we ready to
+    switch" -- /lookup/{phone} is the bot's primary "find my reports" entry
+    point and had no labit-core/archive awareness at all until now.
+    labit-core's /api/dispatch-lookup/{phone} already merges labit_core +
+    shivam_archive (dispatch_lookup_service.py, commit 2da47a2) -- no
+    separate archive-fallback branch needed here, same reasoning as
+    trend-data. Shape lines up with req_lookup.fetch_reqids' own
+    {"reqid","reqno","patient_name","mrno","reqdt"} rows already (plus an
+    additive "source" tag) -- main.py's route needs no reshaping."""
+    if not _labit_core_enabled():
+        return {"phone": phone, "latest_reports": req_lookup.fetch_reqids(phone)}
+    return labit_tools.fetch_lookup(phone)
 
 
 def fetch_trend_data(mrno):
