@@ -68,22 +68,28 @@ def fetch_report_status_by_reqid(reqid):
         return report_status.fetch_report_status_by_reqid(reqid)
 
 
-def fetch_pdf_path(reqno, old_fn, *, scope="all"):
-    """Drop-in replacement for main.py's three PDF-fetching routes
-    (/report/{reqid}, /reports/{reqid}, /radiologyreport/{reqid}) --
-    report_sender_worker.py (py_utils, confirmed 2026-08-30: same
+def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
+    """Drop-in replacement for main.py's PDF-fetching routes (/report,
+    /reports, /radiologyreport, /lab_report -- the full sweep, 2026-08-30)
+    -- report_sender_worker.py (py_utils, confirmed same
     https://api.sdrc.in/py deployment the bot's NEOSOFT_API_BASE_URL also
-    points at) fetches its send-time document from the first of these.
+    points at) fetches its send-time document from /report specifically.
     Returns a FILE PATH, matching the existing FileResponse contract --
     labit_tools.fetch_dispatch_pdf returns raw bytes, written to a temp
     file here so main.py's route logic needs no change beyond calling this.
 
     `old_fn` is a zero-arg callable the CALLER pre-binds to its own exact
-    old Shivam call (get_combined_report/get_report/get_radiology_report
-    all have different signatures -- binding at the call site means this
-    facade never needs to know any of them). `scope` maps to labit-core's
-    dispatch-status/pdf scope param ("radiology" for the radiology-only
-    route, "all" for the other two).
+    old Shivam call (get_combined_report/get_report/get_radiology_report/
+    get_lab_collated_report all have different signatures -- binding at
+    the call site means this facade never needs to know any of them).
+    `scope` maps to labit-core's dispatch-status/pdf scope param
+    ("radiology" for the radiology-only route, "lab" for the lab-only
+    route, "all" for the combined ones). `testids`, when given, is
+    meaningful on the labit-core-native branch (dispatch-status/pdf
+    supports it directly) -- on the archive-fallback branch it has no
+    equivalent (an archived report is one fixed document), so it's simply
+    not sent there, an honest degrade to "the whole archived report"
+    rather than erroring.
 
     Needs `reqno` to reach labit-core at all (its PDF endpoint is reqno-
     keyed) -- report_sender_worker.py's own `_build_report_document_url`
@@ -100,12 +106,26 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all"):
     if not _labit_core_enabled() or not reqno:
         return old_fn()
     try:
-        pdf_bytes = labit_tools.fetch_dispatch_pdf(reqno, scope=scope)
+        pdf_bytes = labit_tools.fetch_dispatch_pdf(reqno, scope=scope, testids=testids)
     except LabitCoreReportNotFound:
         return old_fn()
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(pdf_bytes)
         return tmp.name
+
+
+def fetch_requisitions_by_date(date, org_id=None):
+    """Sweep item, 2026-08-30: the staff Report Dispatch page's date
+    search -- not bot/sender-critical, but real, active daily use.
+    labit-core's endpoint is already the combined answer (built the same
+    session, traced field-for-field against this exact contract), so no
+    archive-fallback branch is needed here either. Import deferred to
+    avoid a circular import -- delivery_api.py itself imports
+    fetch_report_status from THIS module."""
+    if not _labit_core_enabled():
+        from app import delivery_api
+        return delivery_api.fetch_requisitions_by_date(date, org_id=org_id)
+    return labit_tools.fetch_requisitions_by_date(date, org_id=org_id)
 
 
 def fetch_lookup(phone):

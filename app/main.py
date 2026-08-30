@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -489,12 +489,17 @@ def lab_collated_report(
         if testids:
             testid_list = [t.strip() for t in testids.split(",") if t.strip()]
 
-        path = get_lab_collated_report(
-            reqid,
-            include_header=not plain,
-            printtype=printtype,
-            reqno=reqno,
-            testid_filter=testid_list
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_lab_collated_report(
+                reqid,
+                include_header=not plain,
+                printtype=printtype,
+                reqno=reqno,
+                testid_filter=testid_list,
+            ),
+            scope="lab",
+            testids=",".join(testid_list) if testid_list else None,
         )
 
         return FileResponse(
@@ -571,17 +576,24 @@ def combined_report(
 @app.get("/latest-report/{phone}")
 def latest_report(phone):
 
-    rows = fetch_reqids(phone)
+    rows = fetch_lookup(phone).get("latest_reports", [])
 
     if not rows:
         return {"error": "No reports found"}
 
     reqid = rows[0]["reqid"]
+    reqno = rows[0].get("reqno")
+    # Archive-sourced rows carry a "archive:{reqid}" tag (dispatch_lookup_service's
+    # merge convention) -- meaningless to the OLD Shivam fetcher, which has
+    # its own real, valid reqid for the same requisition. Strip it for the
+    # fallback path only; the labit-core branch never sees this value at
+    # all (it's reqno-keyed).
+    shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
 
-    _require_dispatch_allowed(reqid=reqid)
+    _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
     try:
-        path = get_combined_report(reqid)
+        path = fetch_pdf_path(reqno, lambda: get_combined_report(shivam_reqid))
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"latest report unavailable: {exc}") from exc
 
@@ -595,14 +607,14 @@ def latest_report(phone):
 @app.get("/latest-report-meta/{phone}")
 def latest_report_meta(phone):
 
-    rows = fetch_reqids(phone)
+    rows = fetch_lookup(phone).get("latest_reports", [])
 
     if not rows:
         return {"error": "No reports found"}
 
-    reqid = rows[0]["reqid"]
+    reqno = rows[0].get("reqno")
 
-    data = fetch_report_status_by_reqid(reqid)
+    data = fetch_report_status(reqno)
 
     return _attach_dispatch_policy(data)
 
@@ -663,7 +675,7 @@ def delivery_requisitions_by_date(
 ):
 
     try:
-        return fetch_requisitions_by_date(date, org_id=org_id, org_ids=org_ids)
+        return fetch_requisitions_by_date_bb(date, org_id=org_id or None)
     except Exception as exc:
         raise HTTPException(
             status_code=500,

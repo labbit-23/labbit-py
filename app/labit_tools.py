@@ -76,12 +76,12 @@ class LabitCoreReportNotFound(Exception):
     propagate as a normal exception, not be mistaken for "not found"."""
 
 
-def _get(path):
+def _get(path, params=None):
     if not LABIT_CORE_BASE_URL:
         raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
     url = f"{LABIT_CORE_BASE_URL}{path}"
     try:
-        r = requests.get(url, auth=_auth(), timeout=(3, 20))
+        r = requests.get(url, params=params, auth=_auth(), timeout=(3, 20))
     except requests.RequestException as exc:
         raise Exception(f"labit-core report status call failed: {exc}") from exc
     if r.status_code == 404:
@@ -100,6 +100,17 @@ def fetch_report_status(reqno):
 def fetch_report_status_by_reqid(reqid):
     """Drop-in replacement for report_status.fetch_report_status_by_reqid(reqid)."""
     return _get(f"/api/report-status-reqid/{reqid}")
+
+
+def fetch_requisitions_by_date(date, org_id=None):
+    """Drop-in replacement for delivery_api.fetch_requisitions_by_date --
+    labit-core's GET /api/dispatch-status/by-date/{day} (built 2026-08-30,
+    same session) was traced field-for-field against this exact contract
+    (reqno, reqid, patient_name, phoneno, mrno, org_id, org_name), so no
+    reshaping is needed. Sweep item 2026-08-30: the staff Report Dispatch
+    page's date search, not bot/sender-critical but real, active daily use."""
+    params = {"org_id": org_id} if org_id else None
+    return _get(f"/api/dispatch-status/by-date/{date}", params=params)
 
 
 def fetch_lookup(phone):
