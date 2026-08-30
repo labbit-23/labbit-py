@@ -35,7 +35,7 @@ and restarting the process -- no code or git change needed that night.
 import configparser
 from pathlib import Path
 
-from app import labit_tools, report_status
+from app import labit_tools, report_status, trends_data_api
 from app.labit_tools import LabitCoreReportNotFound
 
 config = configparser.ConfigParser()
@@ -65,3 +65,27 @@ def fetch_report_status_by_reqid(reqid):
         return labit_tools.fetch_report_status_by_reqid(reqid)
     except LabitCoreReportNotFound:
         return report_status.fetch_report_status_by_reqid(reqid)
+
+
+def fetch_trend_data(mrno):
+    """User, 2026-08-30: "Trends... the json which TAPIQuery provides, which
+    we need to blackbox to get shivam archive to render... in combination
+    with labit's data." labit-core's own trend-data endpoint already does
+    that combining (patient_archive_service.previous_values_by_mrn) -- no
+    separate archive-fallback branch needed here, since it's MRN-keyed
+    identity, not a reqno that may or may not have migrated. Same
+    config-gated safety as report-status: while the flag is off, this never
+    attempts a labit-core call at all.
+
+    NOTE: response shape is labit-core's own (see
+    labit-core/app/routers/internal.py::trend_data's docstring: "wants a
+    parameters[]-shaped object", the same shape-tolerant contract
+    labit-main's own trend-data consumer already handles) -- NOT
+    trends_data_api.fetch_trends_data's Oracle-row shape. Callers reading
+    specific old field names off the Oracle shape need their own mapping
+    before this is wired into main.py's /trend-data/{mrno} route; not yet
+    done as of this commit, deliberately -- see BUILD_LOG/commit message.
+    """
+    if not _labit_core_enabled():
+        return trends_data_api.fetch_trends_data(mrno)
+    return labit_tools.fetch_trend_data(mrno)

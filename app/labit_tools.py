@@ -100,3 +100,62 @@ def fetch_report_status(reqno):
 def fetch_report_status_by_reqid(reqid):
     """Drop-in replacement for report_status.fetch_report_status_by_reqid(reqid)."""
     return _get(f"/api/report-status-reqid/{reqid}")
+
+
+def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
+    """Drop-in replacement for report_fetcher.get_report()-family calls --
+    labit-core's /api/dispatch-status/{reqno}/pdf now black-boxes core vs
+    archive rendering itself (2026-08-30: "Make labit-core handle the
+    black-boxing?"), so this needs no separate Shivam-fallback branch --
+    once the cutover flag is on, labit-core alone is a complete answer for
+    BOTH a new and a legacy reqno. Returns raw PDF bytes."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    params = {"scope": scope}
+    if testids:
+        params["testids"] = testids if isinstance(testids, str) else ",".join(testids)
+    if include_trends:
+        params["include_trends"] = "true"
+    url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/{reqno}/pdf"
+    try:
+        r = requests.get(url, params=params, auth=_auth(), timeout=(3, 30))
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core dispatch PDF call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core dispatch PDF: unknown requisition for {reqno}")
+    if not r.ok:
+        raise Exception(f"labit-core dispatch PDF API failed: {r.status_code} {r.text[:500]}")
+    return r.content
+
+
+DELIVER_INTERNAL_TOKEN = os.environ.get(
+    "DELIVER_INTERNAL_TOKEN",
+    config["cutover"].get("deliver_internal_token", "") if config.has_section("cutover") else "",
+)
+
+
+def fetch_trend_data(mrno):
+    """Drop-in replacement for trends_data_api.fetch_trends_data(mrno) --
+    labit-core's /internal/dispatch/trend-data/{mrn} already merges
+    labit_core + shivam_archive (patient_archive_service.previous_values_by_mrn,
+    the SAME merge Consultant View's "Previous Reports" tab uses), so this
+    is inherently a combined answer with no separate archive-fallback
+    branch needed -- MRN-keyed identity spans the cutover cleanly, unlike a
+    reqno. User, 2026-08-30: "Trends... the json which TAPIQuery provides,
+    which we need to blackbox to get shivam archive to render... in
+    combination with labit's data" -- this is that blackboxing, done at
+    the labit-core layer, not here."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    if not DELIVER_INTERNAL_TOKEN:
+        raise Exception("DELIVER_INTERNAL_TOKEN must be set in the environment to call labit_tools.fetch_trend_data.")
+    url = f"{LABIT_CORE_BASE_URL}/internal/dispatch/trend-data/{mrno}"
+    try:
+        r = requests.get(url, headers={"X-Internal-Token": DELIVER_INTERNAL_TOKEN}, timeout=(3, 20))
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core trend-data call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core trend-data: unknown mrno {mrno}")
+    if not r.ok:
+        raise Exception(f"labit-core trend-data API failed: {r.status_code} {r.text[:500]}")
+    return r.json()
