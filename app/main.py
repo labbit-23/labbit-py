@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_combined_report_path, fetch_lookup
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -370,6 +370,7 @@ def lookup(phone):
 @app.get("/radiologyreport/{reqid}")
 def radiology_report(
     reqid,
+    reqno: Optional[str] = Query(default=None),
     header_mode: str = Query(default="default"),
     without_header_background: Optional[str] = Query(default=None)
 ):
@@ -380,9 +381,13 @@ def radiology_report(
             without_header_background=without_header_background
         )
 
-        _require_dispatch_allowed(reqid=reqid)
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
 
-        path = get_radiology_report(reqid, apply_background_overlay=not plain)
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_radiology_report(reqid, apply_background_overlay=not plain),
+            scope="radiology",
+        )
 
         return FileResponse(
             path,
@@ -417,11 +422,14 @@ def report(
 
         _require_dispatch_allowed(reqid=reqid, reqno=reqno)
 
-        path = get_report(
-            reqid,
-            include_header=not plain,
-            printtype=printtype,
-            reqno=reqno
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_report(
+                reqid,
+                include_header=not plain,
+                printtype=printtype,
+                reqno=reqno,
+            ),
         )
 
         return FileResponse(
@@ -540,13 +548,15 @@ def combined_report(
 
     _require_dispatch_allowed(reqid=reqid, reqno=reqno)
 
-    path = fetch_combined_report_path(
-        reqid,
-        get_combined_report,
-        reqno=reqno,
-        include_header=not plain,
-        apply_radiology_background=not plain,
-        printtype=printtype,
+    path = fetch_pdf_path(
+        reqno,
+        lambda: get_combined_report(
+            reqid,
+            include_header=not plain,
+            apply_radiology_background=not plain,
+            printtype=printtype,
+            reqno=reqno,
+        ),
     )
 
     return FileResponse(
