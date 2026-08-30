@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -802,7 +802,7 @@ def trend_data(
 ):
 
     try:
-        payload = fetch_trends_data(
+        payload = fetch_trend_data_bb(
             mrno,
             standardized=_is_truthy(standardized),
             psyntax_mode=str(psyntax_mode or "neutral").strip().lower(),

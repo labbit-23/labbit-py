@@ -143,7 +143,7 @@ def fetch_lookup(phone):
     return labit_tools.fetch_lookup(phone)
 
 
-def fetch_trend_data(mrno):
+def fetch_trend_data(mrno, standardized=True, psyntax_mode="neutral"):
     """User, 2026-08-30: "Trends... the json which TAPIQuery provides, which
     we need to blackbox to get shivam archive to render... in combination
     with labit's data." labit-core's own trend-data endpoint already does
@@ -153,15 +153,23 @@ def fetch_trend_data(mrno):
     config-gated safety as report-status: while the flag is off, this never
     attempts a labit-core call at all.
 
-    NOTE: response shape is labit-core's own (see
-    labit-core/app/routers/internal.py::trend_data's docstring: "wants a
-    parameters[]-shaped object", the same shape-tolerant contract
-    labit-main's own trend-data consumer already handles) -- NOT
-    trends_data_api.fetch_trends_data's Oracle-row shape. Callers reading
-    specific old field names off the Oracle shape need their own mapping
-    before this is wired into main.py's /trend-data/{mrno} route; not yet
-    done as of this commit, deliberately -- see BUILD_LOG/commit message.
-    """
+    Response shape is labit-core's own `parameters[]`/`points[]` structure,
+    NOT trends_data_api.fetch_trends_data's flat Oracle-row `data[]` shape
+    -- and that's fine, not a gap: the real consumer
+    (labit-main's app/api/patient/portal/route.js) feeds whatever this
+    returns straight into `normalizeNeosoftTrendPayload()`, which is
+    ALREADY shape-tolerant and accepts labit-core's structure natively
+    (confirmed 2026-08-30, same session, when the Smart Trend PDF route
+    was repointed) -- no reshaping needed there. The one thing that WOULD
+    break un-adapted is main.py's own /trend-data/{mrno} route, which
+    gates on `row_count` (an Oracle-shape-specific key) before returning --
+    so a `row_count` is added here, counting every point across every
+    parameter, purely so that existing gate keeps working for either shape
+    without main.py's route needing to know which one it got."""
     if not _labit_core_enabled():
-        return trends_data_api.fetch_trends_data(mrno)
-    return labit_tools.fetch_trend_data(mrno)
+        return trends_data_api.fetch_trends_data(mrno, standardized=standardized, psyntax_mode=psyntax_mode)
+    payload = labit_tools.fetch_trend_data(mrno)
+    if isinstance(payload, dict) and "row_count" not in payload:
+        parameters = payload.get("parameters") or []
+        payload["row_count"] = sum(len(p.get("points") or []) for p in parameters if isinstance(p, dict))
+    return payload
