@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -1021,20 +1021,27 @@ def outsourced_attachment_meta(
 def outsourced_attachment(
     reqid: str = Query(...),
     testid: str = Query(...),
+    reqno: Optional[str] = Query(default=None),
     source_url: Optional[str] = Query(default=None)
 ):
-    try:
-        _require_dispatch_allowed(reqid=reqid)
+    result_filename = ["outsourced_attachment.pdf"]
+
+    def _old():
         payload = fetch_attachment(reqid, testid, source_url=source_url, save=True)
-        filename = str(payload.get("filename") or "outsourced_attachment.pdf")
+        result_filename[0] = str(payload.get("filename") or "outsourced_attachment.pdf")
         path = str(payload.get("path") or "").strip()
         if not path:
             raise Exception("ATTACHMENT_PATH_MISSING")
+        return path
+
+    try:
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        path = fetch_outsourced_attachment_path(reqno, testid, _old)
 
         return FileResponse(
             path,
             media_type="application/pdf",
-            filename=filename
+            filename=result_filename[0]
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

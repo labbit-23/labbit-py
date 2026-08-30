@@ -102,6 +102,25 @@ def fetch_report_status_by_reqid(reqid):
     return _get(f"/api/report-status-reqid/{reqid}")
 
 
+def fetch_outsourced_attachment(reqno, test_code):
+    """Calls labit-core's new GET /api/dispatch-status/{reqno}/outsourced-attachment
+    (built 2026-08-30, first content-serving endpoint for outsourced
+    results -- previously nothing proxied outsourced content through
+    labit-core at all). Returns (content_bytes, content_type)."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/{reqno}/outsourced-attachment"
+    try:
+        r = requests.get(url, params={"test_code": test_code}, auth=_auth(), timeout=(3, 30))
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core outsourced-attachment call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core outsourced-attachment: none found for {reqno}/{test_code}")
+    if not r.ok:
+        raise Exception(f"labit-core outsourced-attachment API failed: {r.status_code} {r.text[:500]}")
+    return r.content, r.headers.get("content-type", "application/pdf")
+
+
 def fetch_requisitions_by_date(date, org_id=None):
     """Drop-in replacement for delivery_api.fetch_requisitions_by_date --
     labit-core's GET /api/dispatch-status/by-date/{day} (built 2026-08-30,

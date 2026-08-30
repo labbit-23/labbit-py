@@ -114,6 +114,38 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
         return tmp.name
 
 
+def fetch_outsourced_attachment_path(reqno, test_code, old_fn):
+    """User, 2026-08-30 ("yes sure it in", confirming the earlier "want me
+    to wire that side too?"): wires labit-py's /outsourced-attachment to
+    labit-core's brand-new outsourced-attachment endpoint, same pattern as
+    every PDF route today. `old_fn` is a zero-arg callable the caller
+    pre-binds to the exact old fetch_attachment()+FileResponse path.
+
+    Needs BOTH reqno and test_code to reach labit-core (its endpoint is
+    reqno+test_code-keyed, unlike the reqid+testid the old Shivam fetcher
+    uses) -- when either is unavailable, the flag is off, or labit-core
+    genuinely has no attachment yet (LabitCoreReportNotFound -- a vendor
+    result simply not back yet is a real, expected state, not a failure
+    to mask), falls back to the exact old Shivam call unchanged.
+
+    Deliberately does NOT cover /outsourced-report -- that route's QR-
+    extraction/letterhead/background-merge orchestration is much deeper
+    Shivam-specific logic with no labit-core equivalent to call into yet;
+    forcing a simple proxy into that flow would be wrong, not a quick
+    swap. See outsourced_report_logo_stamping_phase2 memory -- that's the
+    same backlog this belongs to, not today's scope."""
+    if not _labit_core_enabled() or not reqno or not test_code:
+        return old_fn()
+    try:
+        content, content_type = labit_tools.fetch_outsourced_attachment(reqno, test_code)
+    except LabitCoreReportNotFound:
+        return old_fn()
+    suffix = ".pdf" if "pdf" in content_type.lower() else ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(content)
+        return tmp.name
+
+
 def fetch_requisitions_by_date(date, org_id=None):
     """Sweep item, 2026-08-30: the staff Report Dispatch page's date
     search -- not bot/sender-critical, but real, active daily use.
