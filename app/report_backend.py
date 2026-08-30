@@ -33,6 +33,7 @@ and restarting the process -- no code or git change needed that night.
 """
 
 import configparser
+import tempfile
 from pathlib import Path
 
 from app import labit_tools, report_status, trends_data_api
@@ -65,6 +66,49 @@ def fetch_report_status_by_reqid(reqid):
         return labit_tools.fetch_report_status_by_reqid(reqid)
     except LabitCoreReportNotFound:
         return report_status.fetch_report_status_by_reqid(reqid)
+
+
+def fetch_combined_report_path(reqid, get_combined_report_fn, *, reqno=None, include_header=True,
+                                apply_radiology_background=True, printtype="1"):
+    """Drop-in replacement for main.py's `get_combined_report(...)` call in
+    the /report/{reqid} route -- the exact URL report_sender_worker.py
+    (py_utils, confirmed 2026-08-30: same https://api.sdrc.in/py deployment
+    the bot's NEOSOFT_API_BASE_URL also points at) fetches to attach the
+    document to every WhatsApp send. Returns a FILE PATH, matching the
+    existing FileResponse contract -- labit_tools.fetch_dispatch_pdf
+    returns raw bytes, written to a temp file here so main.py's route
+    logic needs no change beyond calling this instead.
+
+    Needs `reqno` to reach labit-core at all (its PDF endpoint is reqno-
+    keyed) -- report_sender_worker.py's own `_build_report_document_url`
+    already resolves reqno from the job or the status call in the common
+    case; when it's genuinely unavailable, or the flag is off, or
+    labit-core+archive BOTH come up empty (LabitCoreReportNotFound --
+    Oracle stays live read-only for a month, so this is a legitimate
+    last-resort net, not masking a real failure), falls back to the exact
+    old Shivam call, unchanged. `include_header`/`apply_radiology_background`/
+    `printtype` are Shivam-print-variant options with no labit-core
+    equivalent -- labit-core's own PDF already applies its own unified
+    header/letterhead/background rules, so they're simply not passed
+    through on that path, not silently misapplied."""
+    def _old():
+        return get_combined_report_fn(
+            reqid,
+            include_header=include_header,
+            apply_radiology_background=apply_radiology_background,
+            printtype=printtype,
+            reqno=reqno,
+        )
+
+    if not _labit_core_enabled() or not reqno:
+        return _old()
+    try:
+        pdf_bytes = labit_tools.fetch_dispatch_pdf(reqno, scope="all")
+    except LabitCoreReportNotFound:
+        return _old()
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(pdf_bytes)
+        return tmp.name
 
 
 def fetch_trend_data(mrno):
