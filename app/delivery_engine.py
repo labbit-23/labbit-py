@@ -88,8 +88,11 @@ def get_report_url(reqid):
     return f"{REPORT_PUBLIC_BASE}/report/{reqid}"
 
 
-def get_outsourced_report_url(reqid, testid):
-    return f"{REPORT_PUBLIC_BASE}/outsourced-report?reqid={reqid}&testid={testid}"
+def get_outsourced_report_url(reqid, testid, reqno=None):
+    url = f"{REPORT_PUBLIC_BASE}/outsourced-report?reqid={reqid}&testid={testid}"
+    if reqno:
+        url += f"&reqno={reqno}"
+    return url
 
 
 def verify_pdf_download(url):
@@ -241,7 +244,7 @@ def _send_outsourced_actions(reqno, reqid, phone, context):
             clog(f"[OUTSOURCED][SKIP] duplicate key={key}", "gray")
             continue
 
-        report_url = get_outsourced_report_url(reqid, testid)
+        report_url = get_outsourced_report_url(reqid, testid, reqno=reqno)
         dispatch_kind = f"OUTSOURCED_{mode.upper()}" if mode else "OUTSOURCED"
         clog(f"[OUTSOURCED][PDF-VERIFY-START] reqno={reqno} testid={testid} url={report_url}", "cyan")
         is_valid, pdf_error = verify_pdf_download(report_url)

@@ -205,3 +205,96 @@ def fetch_trend_data(mrno, standardized=True, psyntax_mode="neutral"):
         parameters = payload.get("parameters") or []
         payload["row_count"] = sum(len(p.get("points") or []) for p in parameters if isinstance(p, dict))
     return payload
+
+
+def _core_delivery_status(reqno):
+    payload = labit_tools.fetch_dispatch_status(reqno)
+    live_status = payload.get("live_status") if isinstance(payload, dict) else {}
+    tests = payload.get("tests") if isinstance(payload, dict) else []
+    if not tests and isinstance(live_status, dict):
+        tests = live_status.get("tests") or []
+    ready = 0
+    dispatched = 0
+    for row in tests or []:
+        if not isinstance(row, dict):
+            continue
+        state = str(row.get("state") or "").strip().lower()
+        is_ready = bool(row.get("ready")) or state in {"ready_not_dispatched", "done"}
+        is_dispatched = bool(row.get("dispatched")) or state == "done"
+        if is_ready:
+            ready += 1
+        if is_dispatched:
+            dispatched += 1
+    if dispatched > 0 and ready > 0 and dispatched >= ready:
+        status = "S"
+        message = "OK"
+    elif dispatched > 0:
+        status = "P"
+        message = "PARTIAL REPORT"
+    else:
+        status = ""
+        message = ""
+    return {
+        "reqno": str(reqno),
+        "status": status,
+        "channel": "CORE",
+        "message": message,
+        "edituserid": "labit-core",
+        "delivery_date": "",
+        "row": {
+            "source_backend": "labit_core",
+            "overall_status": str((live_status or {}).get("overall_status") or "").strip().upper(),
+            "ready_count": ready,
+            "dispatched_count": dispatched,
+        },
+        "rows": [],
+    }
+
+
+def fetch_delivery_status(reqno, old_fn):
+    if not _labit_core_enabled():
+        return old_fn()
+    try:
+        return _core_delivery_status(reqno)
+    except LabitCoreReportNotFound:
+        return old_fn()
+
+
+def update_delivery_status(reqno, status, channel, message, old_fn):
+    if not _labit_core_enabled():
+        return old_fn()
+    status_text = str(status or "").strip().upper()
+    channel_text = str(channel or "").strip().lower()
+    if status_text != "S":
+        old_result = old_fn()
+        return {
+            **old_result,
+            "source_backend": "shivam",
+            "labit_core_delivery_event": {"skipped": True, "reason": "not_success_status"},
+        }
+    try:
+        core_result = labit_tools.mark_requisition_delivered(reqno, channel=channel_text or "whatsapp")
+    except LabitCoreReportNotFound:
+        old_result = old_fn()
+        return {
+            **old_result,
+            "source_backend": "shivam",
+            "labit_core_delivery_event": {"skipped": True, "reason": "not_found"},
+        }
+    old_result = {"reqno": reqno, "status": status, "channel": channel, "message": message}
+    old_update_error = None
+    try:
+        maybe_old_result = old_fn()
+        if isinstance(maybe_old_result, dict):
+            old_result = maybe_old_result
+    except Exception as exc:
+        old_update_error = str(exc)
+    return {
+        **old_result,
+        "source_backend": "labit_core",
+        "labit_core_delivery_event": core_result,
+        "shivam_delivery_status_update": {
+            "ok": old_update_error is None,
+            "error": old_update_error,
+        },
+    }

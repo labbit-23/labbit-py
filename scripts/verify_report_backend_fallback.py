@@ -74,12 +74,69 @@ def case_3_other_error_does_not_fall_back() -> bool:
     return ok
 
 
+def case_4_delivery_status_flag_off_uses_shivam() -> bool:
+    old = mock.Mock(return_value={"source": "shivam", "status": "S"})
+    with mock.patch.object(report_backend, "_labit_core_enabled", return_value=False), \
+         mock.patch.object(labit_tools, "fetch_dispatch_status") as core:
+        result = report_backend.fetch_delivery_status("R1", old)
+    ok = result == {"source": "shivam", "status": "S"} and old.called and not core.called
+    print(f"[{'OK' if ok else 'FAIL'}] Case 4 (delivery status flag off -> Shivam): {result}")
+    return ok
+
+
+def case_5_delivery_status_core_success() -> bool:
+    old = mock.Mock()
+    core_payload = {
+        "live_status": {"overall_status": "FULL_REPORT"},
+        "tests": [
+            {"state": "done", "ready": False, "dispatched": True},
+        ],
+    }
+    with mock.patch.object(report_backend, "_labit_core_enabled", return_value=True), \
+         mock.patch.object(labit_tools, "fetch_dispatch_status", return_value=core_payload):
+        result = report_backend.fetch_delivery_status("R1", old)
+    ok = result["status"] == "S" and result["row"]["source_backend"] == "labit_core" and not old.called
+    print(f"[{'OK' if ok else 'FAIL'}] Case 5 (delivery status flag on -> Core): {result}")
+    return ok
+
+
+def case_6_delivery_update_success_dual_writes_core() -> bool:
+    old = mock.Mock(return_value={"source": "shivam", "status": "S"})
+    core_result = {"ok": True, "marked": 2}
+    with mock.patch.object(report_backend, "_labit_core_enabled", return_value=True), \
+         mock.patch.object(labit_tools, "mark_requisition_delivered", return_value=core_result) as core:
+        result = report_backend.update_delivery_status("R1", "S", "WHATSAPP", "OK NORMAL", old)
+    ok = (
+        old.called
+        and core.called
+        and result["source_backend"] == "labit_core"
+        and result["labit_core_delivery_event"] == core_result
+        and result["shivam_delivery_status_update"]["ok"] is True
+    )
+    print(f"[{'OK' if ok else 'FAIL'}] Case 6 (delivery update success -> Shivam + Core): {result}")
+    return ok
+
+
+def case_7_delivery_update_non_success_skips_core() -> bool:
+    old = mock.Mock(return_value={"source": "shivam", "status": "P"})
+    with mock.patch.object(report_backend, "_labit_core_enabled", return_value=True), \
+         mock.patch.object(labit_tools, "mark_requisition_delivered") as core:
+        result = report_backend.update_delivery_status("R1", "P", "WHATSAPP", "PARTIAL REPORT", old)
+    ok = old.called and not core.called and result["labit_core_delivery_event"]["reason"] == "not_success_status"
+    print(f"[{'OK' if ok else 'FAIL'}] Case 7 (delivery update non-success -> Core skipped): {result}")
+    return ok
+
+
 def main() -> int:
     results = [
         case_0_disabled_never_calls_labit_core(),
         case_1_labit_core_success(),
         case_2_not_found_falls_back(),
         case_3_other_error_does_not_fall_back(),
+        case_4_delivery_status_flag_off_uses_shivam(),
+        case_5_delivery_status_core_success(),
+        case_6_delivery_update_success_dual_writes_core(),
+        case_7_delivery_update_non_success_skips_core(),
     ]
     print()
     if all(results):

@@ -168,6 +168,14 @@ def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
     return r.content
 
 
+def fetch_dispatch_status(reqno):
+    """Core's cleaner dispatch-status shape, including per-report dispatched
+    state. This is distinct from the legacy report-status compatibility shape:
+    labit-py's old /delivery/status contract needs to know whether something
+    was actually delivered, not merely whether a report is ready."""
+    return _get(f"/api/dispatch-status/{reqno}")
+
+
 DELIVER_INTERNAL_TOKEN = os.environ.get(
     "DELIVER_INTERNAL_TOKEN",
     config["cutover"].get("deliver_internal_token", "") if config.has_section("cutover") else "",
@@ -198,4 +206,38 @@ def fetch_trend_data(mrno):
         raise LabitCoreReportNotFound(f"labit-core trend-data: unknown mrno {mrno}")
     if not r.ok:
         raise Exception(f"labit-core trend-data API failed: {r.status_code} {r.text[:500]}")
+    return r.json()
+
+
+def mark_requisition_delivered(reqno, channel="whatsapp", scope="all", testids=None):
+    """Translate labit-py's legacy reqno-level delivery-status update into
+    Core's report-level append-only delivery events.
+
+    This intentionally uses the internal token path, not staff session auth:
+    the caller is the existing server-side dispatch pipeline.
+    """
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    if not DELIVER_INTERNAL_TOKEN:
+        raise Exception("DELIVER_INTERNAL_TOKEN must be set in the environment to call labit_tools.mark_requisition_delivered.")
+    payload = {
+        "reqno": str(reqno or "").strip(),
+        "channel": str(channel or "whatsapp").strip().lower(),
+        "scope": str(scope or "all").strip().lower(),
+    }
+    if testids:
+        payload["testids"] = testids
+    try:
+        r = requests.post(
+            f"{LABIT_CORE_BASE_URL}/internal/dispatch/mark-requisition-delivered",
+            headers={"X-Internal-Token": DELIVER_INTERNAL_TOKEN},
+            json=payload,
+            timeout=(3, 20),
+        )
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core mark-requisition-delivered call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core mark-requisition-delivered: unknown requisition {reqno}")
+    if not r.ok:
+        raise Exception(f"labit-core mark-requisition-delivered API failed: {r.status_code} {r.text[:500]}")
     return r.json()

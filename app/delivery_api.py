@@ -4,7 +4,11 @@ from pathlib import Path
 
 import requests
 
-from app.report_backend import fetch_report_status
+from app.report_backend import (
+    fetch_delivery_status as fetch_delivery_status_bb,
+    fetch_report_status,
+    update_delivery_status as update_delivery_status_bb,
+)
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -203,6 +207,13 @@ def fetch_requisitions_by_date(date, org_id=None, org_ids=None):
 
 
 def fetch_delivery_status(reqno):
+    def _old():
+        return _fetch_delivery_status_shivam(reqno)
+
+    return fetch_delivery_status_bb(reqno, _old)
+
+
+def _fetch_delivery_status_shivam(reqno):
     rows = _unwrap_rows(_call_tapi_query(GET_DELIVERY_STATUS_API, {"reqno": reqno}))
 
     if isinstance(rows, list):
@@ -235,25 +246,28 @@ def fetch_delivery_status(reqno):
         "rows": decoded_rows,
     }
 def fetch_update_delivery_status(reqno, status, channel, message):
-    encoded = _encode_delivery_update(reqno, status, channel, message)
-    rows = _unwrap_rows(_call_tapi_query(
-        UPDATE_STATUS_API,
-        {
-            "reqno": reqno,
-            "status": encoded["status"],
-            "channel": encoded["channel"],
-            "message": encoded["message"]
-        }
-    ))
+    def _old():
+        encoded = _encode_delivery_update(reqno, status, channel, message)
+        rows = _unwrap_rows(_call_tapi_query(
+            UPDATE_STATUS_API,
+            {
+                "reqno": reqno,
+                "status": encoded["status"],
+                "channel": encoded["channel"],
+                "message": encoded["message"]
+            }
+        ))
 
-    return {
-        "reqno": reqno,
-        "status": status,
-        "channel": channel,
-        "message": message,
-        "stored_as": encoded,
-        "backend_result": rows
-    }
+        return {
+            "reqno": reqno,
+            "status": status,
+            "channel": channel,
+            "message": message,
+            "stored_as": encoded,
+            "backend_result": rows
+        }
+
+    return update_delivery_status_bb(reqno, status, channel, message, _old)
 
 
 def get_requisitions_by_date(date):

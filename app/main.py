@@ -8,6 +8,7 @@ from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
 from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
+from app.labit_tools import LabitCoreReportNotFound
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -1091,6 +1092,7 @@ def outsourced_report_meta(
 def outsourced_report(
     reqid: str = Query(...),
     testid: str = Query(...),
+    reqno: Optional[str] = Query(default=None),
     source_url: Optional[str] = Query(default=None),
     qr_url: Optional[str] = Query(default=None),
     fallback_to_base: Optional[str] = Query(default="false"),
@@ -1099,7 +1101,21 @@ def outsourced_report(
     without_header_background: Optional[str] = Query(default=None)
 ):
     try:
-        _require_dispatch_allowed(reqid=reqid)
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+
+        def _core_old_fallback():
+            raise LabitCoreReportNotFound("fall through to legacy outsourced-report renderer")
+
+        try:
+            path = fetch_outsourced_attachment_path(reqno, testid, _core_old_fallback)
+            return FileResponse(
+                path,
+                media_type="application/pdf",
+                filename=f"OUTSOURCED_{reqid}_{testid}.pdf",
+            )
+        except LabitCoreReportNotFound:
+            pass
+
         payload = fetch_outsourced_report(
             reqid=reqid,
             testid=testid,

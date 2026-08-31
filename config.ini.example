@@ -107,3 +107,4 @@ report_status_use_labit_core = false
 labit_core_base_url =
 labit_core_service_username =
 labit_core_service_password =
+deliver_internal_token =
