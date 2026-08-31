@@ -384,11 +384,18 @@ def radiology_report(
             without_header_background=without_header_background
         )
 
-        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        # Archive-sourced rows carry a "archive:{reqid}" tag (dispatch_lookup_service's
+        # merge convention) -- meaningless to the OLD Shivam fetcher/status lookup,
+        # which has its own real, valid reqid for the same requisition. Strip it for
+        # the fallback path only; the labit-core branch (fetch_pdf_path, reqno-keyed)
+        # never sees this value at all.
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
         path = fetch_pdf_path(
             reqno,
-            lambda: get_radiology_report(reqid, apply_background_overlay=not plain),
+            lambda: get_radiology_report(shivam_reqid, apply_background_overlay=not plain),
             scope="radiology",
         )
 
@@ -423,12 +430,14 @@ def report(
             chkrephead=chkrephead
         )
 
-        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
         path = fetch_pdf_path(
             reqno,
             lambda: get_report(
-                reqid,
+                shivam_reqid,
                 include_header=not plain,
                 printtype=printtype,
                 reqno=reqno,
@@ -485,7 +494,9 @@ def lab_collated_report(
             chkrephead=chkrephead
         )
 
-        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
         # Parse testids if provided (comma-separated)
         testid_list = None
@@ -495,7 +506,7 @@ def lab_collated_report(
         path = fetch_pdf_path(
             reqno,
             lambda: get_lab_collated_report(
-                reqid,
+                shivam_reqid,
                 include_header=not plain,
                 printtype=printtype,
                 reqno=reqno,
@@ -554,12 +565,14 @@ def combined_report(
         chkrephead=chkrephead
     )
 
-    _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+    shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+    _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
     path = fetch_pdf_path(
         reqno,
         lambda: get_combined_report(
-            reqid,
+            shivam_reqid,
             include_header=not plain,
             apply_radiology_background=not plain,
             printtype=printtype,
