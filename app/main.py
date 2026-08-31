@@ -33,7 +33,7 @@ import os
 import configparser
 from pathlib import Path
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -61,6 +61,8 @@ class DeliveryStatusUpdateRequest(BaseModel):
     status: str
     channel: str
     message: str
+    scope: Optional[str] = "all"
+    testids: Optional[List[str]] = None
 
 
 class ShivamDemographicsUpdateRequest(BaseModel):
@@ -779,7 +781,9 @@ def delivery_status_update(payload: DeliveryStatusUpdateRequest):
             payload.reqno,
             payload.status,
             payload.channel,
-            payload.message
+            payload.message,
+            scope=payload.scope or "all",
+            testids=payload.testids,
         )
     except Exception as exc:
         raise HTTPException(

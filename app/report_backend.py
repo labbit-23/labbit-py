@@ -260,7 +260,7 @@ def fetch_delivery_status(reqno, old_fn):
         return old_fn()
 
 
-def update_delivery_status(reqno, status, channel, message, old_fn):
+def update_delivery_status(reqno, status, channel, message, old_fn, *, scope="all", testids=None):
     if not _labit_core_enabled():
         return old_fn()
     status_text = str(status or "").strip().upper()
@@ -273,7 +273,12 @@ def update_delivery_status(reqno, status, channel, message, old_fn):
             "labit_core_delivery_event": {"skipped": True, "reason": "not_success_status"},
         }
     try:
-        core_result = labit_tools.mark_requisition_delivered(reqno, channel=channel_text or "whatsapp")
+        core_result = labit_tools.mark_requisition_delivered(
+            reqno,
+            channel=channel_text or "whatsapp",
+            scope=scope or "all",
+            testids=testids,
+        )
     except LabitCoreReportNotFound:
         old_result = old_fn()
         return {

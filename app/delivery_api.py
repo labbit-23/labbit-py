@@ -245,7 +245,7 @@ def _fetch_delivery_status_shivam(reqno):
         "row": latest_decoded,
         "rows": decoded_rows,
     }
-def fetch_update_delivery_status(reqno, status, channel, message):
+def fetch_update_delivery_status(reqno, status, channel, message, scope="all", testids=None):
     def _old():
         encoded = _encode_delivery_update(reqno, status, channel, message)
         rows = _unwrap_rows(_call_tapi_query(
@@ -267,7 +267,7 @@ def fetch_update_delivery_status(reqno, status, channel, message):
             "backend_result": rows
         }
 
-    return update_delivery_status_bb(reqno, status, channel, message, _old)
+    return update_delivery_status_bb(reqno, status, channel, message, _old, scope=scope, testids=testids)
 
 
 def get_requisitions_by_date(date):
