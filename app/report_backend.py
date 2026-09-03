@@ -36,7 +36,7 @@ import configparser
 import tempfile
 from pathlib import Path
 
-from app import labit_tools, report_status, req_lookup, trends_data_api
+from app import labit_tools, pdf_cache, report_status, req_lookup, trends_data_api
 from app.labit_tools import LabitCoreReportNotFound
 
 config = configparser.ConfigParser()
@@ -105,8 +105,22 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
     through on that path, not silently misapplied."""
     if not _labit_core_enabled() or not reqno:
         return old_fn()
+    # 2026-09-03: short-TTL cache in front of the live labit-core call -- see
+    # pdf_cache.py docstring. Key is content-addressed on exactly the inputs
+    # that affect the rendered bytes; a repeat/retry fetch for the same
+    # requisition within the reuse window (WhatsApp's own retry, our resend,
+    # or the send-time reachability prefetch in labit-main) is served from
+    # disk instead of re-rendering.
+    cache_key = "labit_core_pdf|" + "|".join([
+        str(reqno).strip(),
+        str(scope or "all").strip(),
+        ",".join(sorted(testids)) if testids else "",
+    ])
     try:
-        pdf_bytes = labit_tools.fetch_dispatch_pdf(reqno, scope=scope, testids=testids)
+        pdf_bytes = pdf_cache.get_or_render(
+            cache_key,
+            lambda: labit_tools.fetch_dispatch_pdf(reqno, scope=scope, testids=testids),
+        )
     except LabitCoreReportNotFound:
         return old_fn()
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
