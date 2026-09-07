@@ -835,6 +835,15 @@ def trend_data(
             }
         ) from exc
 
+    # labit-core answered explicitly that this patient is non-trendable
+    # (rapid / walk-in placeholder MRN). Pass that through as a 200 so the
+    # consumer can show "contact the lab for trend data reports" instead of
+    # treating it like an unknown MRN.
+    if isinstance(payload, dict) and payload.get("trend_available") is False:
+        if not _is_truthy(include_raw):
+            payload.pop("data", None)
+        return payload
+
     if int(payload.get("row_count", 0) or 0) == 0:
         raise HTTPException(
             status_code=404,
