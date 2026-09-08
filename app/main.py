@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pypdf import PdfReader, PdfWriter
 from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
 from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
-from app.labit_tools import LabitCoreReportNotFound
+from app.labit_tools import LabitCoreReportNotFound, fetch_document
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -585,6 +585,27 @@ def combined_report(
         media_type="application/pdf",
         filename=f"{reqid}.pdf"
     )
+
+# -----------------------------
+# Transactional document passthrough (e-bill / bill / estimate / receipt / ...)
+# for the patient-message-jobs framework. Thin proxy to labit-core's
+# /api/dispatch-status/documents/{kind}/{ref}; auth is server-to-server there.
+# -----------------------------
+@app.get("/document/{kind}/{ref}")
+def transactional_document(kind: str, ref: str):
+    try:
+        content, ctype = fetch_document(kind, ref)
+    except LabitCoreReportNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={"endpoint": "document", "kind": kind, "ref": ref, "error": "not found"},
+        )
+    return Response(
+        content=content,
+        media_type=ctype or "application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{kind}-{ref}.pdf"'},
+    )
+
 
 # -----------------------------
 # Fetch latest report directly

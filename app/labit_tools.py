@@ -121,6 +121,25 @@ def fetch_outsourced_attachment(reqno, test_code):
     return r.content, r.headers.get("content-type", "application/pdf")
 
 
+def fetch_document(kind, ref):
+    """labit-core GET /api/dispatch-status/documents/{kind}/{ref} -- generic
+    transactional-document fetch (e-bill / bill / estimate / receipt / ...)
+    for the patient-message-jobs framework. `kind` resolves in labit-core's
+    DOCUMENT_KINDS registry. Returns (content_bytes, content_type)."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/documents/{kind}/{ref}"
+    try:
+        r = requests.get(url, auth=_auth(), timeout=(3, 30))
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core document call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core document: {kind}/{ref} not found")
+    if not r.ok:
+        raise Exception(f"labit-core document API failed: {r.status_code} {r.text[:500]}")
+    return r.content, r.headers.get("content-type", "application/pdf")
+
+
 def fetch_requisitions_by_date(date, org_id=None):
     """Drop-in replacement for delivery_api.fetch_requisitions_by_date --
     labit-core's GET /api/dispatch-status/by-date/{day} (built 2026-08-30,
