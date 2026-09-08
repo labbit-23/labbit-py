@@ -145,7 +145,20 @@ def _build_deny_payload(status_data):
     source_id = _first_non_empty_source_value(status_data, "source_id", "SOURCE_ID", "sourceid", "SOURCEID", "refdoctor", "REFDOCTOR")
     source_name = _first_non_empty_source_value(status_data, "source_name", "SOURCE_NAME", "sourcenm", "SOURCENM", "drname", "DRNAME")
 
-    if source_id and source_id in DO_NOT_SEND_SOURCE_IDS:
+    # labit-core computes confidentiality from labit_core.referrer.confidential
+    # and returns it on the status payload (dispatch_allowed / denial_code).
+    # Honour that so the flag has ONE source of truth (the labit_core column)
+    # across every path -- the bot, the auto-sender, direct PDF fetches --
+    # instead of relying on this separate labit-py deny-list staying in sync.
+    core_denied = (
+        isinstance(status_data, dict)
+        and (
+            status_data.get("dispatch_allowed") is False
+            or str(status_data.get("dispatch_denial_code") or "").upper()
+            == "SOURCE_CONFIDENTIAL_DO_NOT_SEND"
+        )
+    )
+    if core_denied or (source_id and source_id in DO_NOT_SEND_SOURCE_IDS):
         return {
             "dispatch_allowed": False,
             "code": "SOURCE_CONFIDENTIAL_DO_NOT_SEND",
@@ -164,15 +177,20 @@ def _build_deny_payload(status_data):
 
 
 def _require_dispatch_allowed(*, reqid=None, reqno=None, status_data=None):
-    if not DO_NOT_SEND_SOURCE_IDS:
-        return
-
     data = status_data
     if not isinstance(data, dict):
-        if reqid:
-            data = fetch_report_status_by_reqid(reqid)
-        elif reqno:
-            data = fetch_report_status(reqno)
+        # Resolve status -- the confidentiality signal can come from
+        # labit-core's referrer.confidential (on the status payload), not only
+        # this labit-py deny-list. A status lookup that fails (e.g. a
+        # pre-cutover archive reqid labit-core doesn't know) leaves data={} and
+        # falls through to the deny-list check, i.e. current behaviour.
+        try:
+            if reqid:
+                data = fetch_report_status_by_reqid(reqid)
+            elif reqno:
+                data = fetch_report_status(reqno)
+        except Exception:
+            data = {}
 
     deny = _build_deny_payload(data if isinstance(data, dict) else {})
     if not deny.get("dispatch_allowed", True):
@@ -592,9 +610,9 @@ def combined_report(
 # /api/dispatch-status/documents/{kind}/{ref}; auth is server-to-server there.
 # -----------------------------
 @app.get("/document/{kind}/{ref}")
-def transactional_document(kind: str, ref: str):
+def transactional_document(kind: str, ref: str, patient_dispatch: bool = Query(default=False)):
     try:
-        content, ctype = fetch_document(kind, ref)
+        content, ctype = fetch_document(kind, ref, patient_dispatch=patient_dispatch)
     except LabitCoreReportNotFound:
         raise HTTPException(
             status_code=404,

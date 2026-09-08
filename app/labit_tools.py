@@ -121,16 +121,18 @@ def fetch_outsourced_attachment(reqno, test_code):
     return r.content, r.headers.get("content-type", "application/pdf")
 
 
-def fetch_document(kind, ref):
+def fetch_document(kind, ref, patient_dispatch=False):
     """labit-core GET /api/dispatch-status/documents/{kind}/{ref} -- generic
     transactional-document fetch (e-bill / bill / estimate / receipt / ...)
     for the patient-message-jobs framework. `kind` resolves in labit-core's
-    DOCUMENT_KINDS registry. Returns (content_bytes, content_type)."""
+    DOCUMENT_KINDS registry. patient_dispatch=True makes labit-core refuse a
+    confidential-org requisition. Returns (content_bytes, content_type)."""
     if not LABIT_CORE_BASE_URL:
         raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
     url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/documents/{kind}/{ref}"
+    params = {"patient_dispatch": "true"} if patient_dispatch else None
     try:
-        r = requests.get(url, auth=_auth(), timeout=(3, 30))
+        r = requests.get(url, params=params, auth=_auth(), timeout=(3, 30))
     except requests.RequestException as exc:
         raise Exception(f"labit-core document call failed: {exc}") from exc
     if r.status_code == 404:
