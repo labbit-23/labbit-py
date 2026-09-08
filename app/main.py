@@ -904,9 +904,35 @@ def trend_data(
 # -----------------------------
 @app.get("/trend-report/{mrno}")
 def trend_report(mrno):
+    # Primary: labit-core Report pipeline trends view (merged labit +
+    # archive parameter history) via /api/dispatch-status/documents/trend/
+    # {mrn}. Falls back to Shivam's globalreport webform only for a clean
+    # 404 (MRN unknown to labit-core) -- during cutover, never for a real
+    # error. A rapid/walk-in MRN is explicitly not trend-eligible; surface
+    # that rather than rendering an empty legacy report.
+    try:
+        content, ctype = fetch_document("trend", mrno, patient_dispatch=False)
+        return Response(
+            content=content,
+            media_type=ctype or "application/pdf",
+            headers={"Content-Disposition": f'inline; filename="trend_{mrno}.pdf"'},
+        )
+    except LabitCoreReportNotFound:
+        pass
+    except Exception as exc:
+        if "TREND_NOT_AVAILABLE_RAPID_PATIENT" in str(exc):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "endpoint": "trend-report",
+                    "mrno": mrno,
+                    "error": "TREND_NOT_AVAILABLE_RAPID_PATIENT",
+                    "message": "Please contact the lab for Trend Data reports.",
+                },
+            )
+        raise
 
     path = get_trend_report(mrno)
-
     return FileResponse(
         path,
         media_type="application/pdf",
