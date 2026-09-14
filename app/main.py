@@ -8,7 +8,7 @@ from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
 from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
-from app.labit_tools import LabitCoreReportNotFound, fetch_document
+from app.labit_tools import LabitCoreReportNotFound, fetch_document, fetch_core_price_list
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -997,6 +997,30 @@ def shivam_pricelist(lab_id: str = Query(default="")):
             detail={
                 "endpoint": "shivam/pricelist",
                 "lab_id": str(lab_id or "").strip(),
+                "error": str(exc)
+            }
+        ) from exc
+
+
+@app.get("/live-sync/pricelist")
+def live_sync_pricelist(price_list_id: str = Query(default="")):
+    """Replaces shivam_pricelist above as labit-main's Live Sync source
+    (director, 2026-09-14: "decouple from shivam and move to core... add
+    some other name like Native or something. Or Live Sync or some.").
+    labit-core is the source of truth going forward -- see
+    app.labit_tools.fetch_core_price_list's own docstring for the auth/
+    identity reasoning. shivam_pricelist is left in place, unused by
+    labit-main after this, rather than deleted -- no other known caller,
+    but removing a live route isn't this change's job."""
+    try:
+        clean_price_list_id = str(price_list_id or "").strip()
+        return {"items": fetch_core_price_list(clean_price_list_id or None)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "live-sync/pricelist",
+                "price_list_id": str(price_list_id or "").strip(),
                 "error": str(exc)
             }
         ) from exc

@@ -262,3 +262,38 @@ def mark_requisition_delivered(reqno, channel="whatsapp", scope="all", testids=N
     if not r.ok:
         raise Exception(f"labit-core mark-requisition-delivered API failed: {r.status_code} {r.text[:500]}")
     return r.json()
+
+
+def fetch_core_price_list(price_list_id=None):
+    """labit-core's own price/catalog master -- the "Live Sync" source for
+    labit-main's pricelist-sync (replaces the old Shivam/NeoSoft pricelist
+    call, director 2026-09-14: "decouple from shivam and move to core").
+
+    Uses HTTP Basic (_auth(), the svc_dispatch_bot credential), not the
+    internal-token path -- labit-core's price-list-export route is gated on
+    require_service("price_list.export"), the same require_service()
+    mechanism fetch_report_status above uses, not internal.py's token
+    scheme. svc_dispatch_bot was granted the price_sync role specifically
+    for this (2026-09-14) rather than minting a new service credential --
+    "don't reset [the existing price_sync account's password], don't know
+    what else depends on it" (director) -- this reuses the identity
+    labit-py already authenticates as everywhere else in this file.
+
+    Returns labit-core's own field shape directly (internal_code/
+    lab_test_name/price/active/patient_visible) -- no translation needed,
+    labit-main's Live Sync route consumes these names already."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    params = {"price_list_id": price_list_id} if price_list_id else {}
+    try:
+        r = requests.get(
+            f"{LABIT_CORE_BASE_URL}/api/catalog/price-list-export",
+            params=params,
+            auth=_auth(),
+            timeout=(3, 30),
+        )
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core price-list-export call failed: {exc}") from exc
+    if not r.ok:
+        raise Exception(f"labit-core price-list-export API failed: {r.status_code} {r.text[:500]}")
+    return r.json().get("items", [])
