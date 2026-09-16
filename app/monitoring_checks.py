@@ -154,8 +154,20 @@ def run_heartbeat_check(section_name, cfg, _default_timeout):
 
 
 def _mirth_stats(root):
+    """Reads only the channel-level <statistics> block. Mirth's per-channel
+    status XML also nests a separate <statistics> block under each child
+    connector (Source, each destination) inside <childStatuses> -- a naive
+    './/entry' search collects entries from all of those too, and since
+    later ones overwrite earlier ones in this flat dict, the result ends up
+    being whichever child connector's stats appear last in the document
+    (typically a destination, whose own RECEIVED count trivially equals its
+    SENT count when nothing fails). Scoping to the direct 'statistics'
+    child avoids that."""
     stats = {}
-    for entry in root.findall(".//entry"):
+    statistics_el = root.find("statistics")
+    if statistics_el is None:
+        return stats
+    for entry in statistics_el.findall("entry"):
         children = list(entry)
         if len(children) < 2:
             continue
@@ -194,7 +206,11 @@ def run_mirth_api_check(section_name, cfg, default_timeout):
             if status_response.status_code == 200:
                 status_root = ET.fromstring(status_response.text)
                 stats = _mirth_stats(status_root)
-                row.update({"state": (status_root.findtext("state") or "unknown").lower(), "received": stats.get("RECEIVED", 0), "sent": stats.get("SENT", 0), "errors": stats.get("ERROR", 0), "filtered": stats.get("FILTERED", 0), "queued": stats.get("QUEUED", 0)})
+                # "queued" is its own top-level <queued> element on the
+                # channel status response, not one of the <statistics>
+                # <entry> rows -- it was never populated via stats.get(...).
+                queued = int((status_root.findtext("queued") or "0").strip() or 0)
+                row.update({"state": (status_root.findtext("state") or "unknown").lower(), "received": stats.get("RECEIVED", 0), "sent": stats.get("SENT", 0), "errors": stats.get("ERROR", 0), "filtered": stats.get("FILTERED", 0), "queued": queued})
                 attempted = row["sent"] + row["errors"]
                 row["success_rate_percent"] = round(row["sent"] * 100 / attempted, 2) if attempted else None
             else:
