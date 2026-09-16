@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 import requests
+import xml.etree.ElementTree as ET
 
 
 VALID_STATUSES = {"healthy", "degraded", "down", "unknown"}
@@ -152,6 +153,66 @@ def run_heartbeat_check(section_name, cfg, _default_timeout):
         return _finalize(result, started_at, "down", str(exc), {"path": path})
 
 
+def _mirth_stats(root):
+    stats = {}
+    for entry in root.findall(".//entry"):
+        children = list(entry)
+        if len(children) < 2:
+            continue
+        key = (children[0].text or "").strip().upper()
+        try:
+            stats[key] = int((children[1].text or "0").strip())
+        except ValueError:
+            pass
+    return stats
+
+
+def run_mirth_api_check(section_name, cfg, default_timeout):
+    """Read-only Mirth Admin API check with per-channel metrics."""
+    result = _base_result(section_name, cfg)
+    started_at = time.perf_counter()
+    base_url = cfg.get("url", "").strip().rstrip("/")
+    timeout = float(cfg.get("timeout_seconds", default_timeout))
+    username = cfg.get("username", "").strip()
+    password = cfg.get("password", "").strip()
+    verify_ssl = cfg.get("verify_ssl", "1").strip().lower() not in {"0", "false", "no", "off"}
+    if not base_url or not username or not password:
+        return _finalize(result, started_at, "unknown", "Mirth API URL/credentials not configured")
+    headers = {"X-Requested-With": cfg.get("header_x_requested_with", "OpenAPI")}
+    try:
+        response = requests.get(base_url + "/channels", auth=(username, password), headers=headers, verify=verify_ssl, timeout=timeout)
+        if response.status_code != 200:
+            return _finalize(result, started_at, "down", f"Mirth channels API returned HTTP {response.status_code}", {"status_code": response.status_code})
+        root = ET.fromstring(response.text)
+        channels = []
+        for channel in root.findall(".//channel"):
+            channel_id = (channel.findtext("id") or "").strip()
+            if not channel_id:
+                continue
+            status_response = requests.get(base_url + f"/channels/{channel_id}/status", auth=(username, password), headers=headers, verify=verify_ssl, timeout=timeout)
+            row = {"channel_id": channel_id, "name": (channel.findtext("name") or channel_id).strip()}
+            if status_response.status_code == 200:
+                status_root = ET.fromstring(status_response.text)
+                stats = _mirth_stats(status_root)
+                row.update({"state": (status_root.findtext("state") or "unknown").lower(), "received": stats.get("RECEIVED", 0), "sent": stats.get("SENT", 0), "errors": stats.get("ERROR", 0), "filtered": stats.get("FILTERED", 0), "queued": stats.get("QUEUED", 0)})
+                attempted = row["sent"] + row["errors"]
+                row["success_rate_percent"] = round(row["sent"] * 100 / attempted, 2) if attempted else None
+            else:
+                row.update({"state": "unknown", "status_code": status_response.status_code})
+            channels.append(row)
+        stopped = [row["name"] for row in channels if row.get("state") not in {"started", "unknown"}]
+        message = f"Mirth API healthy; {len(channels)} channels inspected"
+        if stopped:
+            message += "; stopped: " + ", ".join(stopped[:5])
+        return _finalize(result, started_at, "degraded" if stopped else "healthy", message, {"channel_count": len(channels), "stopped_channels": stopped, "channels": channels, "url": base_url})
+    except requests.Timeout:
+        return _finalize(result, started_at, "down", f"Timed out after {timeout}s", {"url": base_url})
+    except ET.ParseError as exc:
+        return _finalize(result, started_at, "down", f"Invalid Mirth XML: {exc}", {"url": base_url})
+    except Exception as exc:
+        return _finalize(result, started_at, "down", str(exc), {"url": base_url})
+
+
 def run_check(section_name, cfg, default_timeout):
     check_type = cfg.get("type", "http_json").strip().lower()
 
@@ -161,6 +222,8 @@ def run_check(section_name, cfg, default_timeout):
         return run_tcp_check(section_name, cfg, default_timeout)
     if check_type == "heartbeat_file":
         return run_heartbeat_check(section_name, cfg, default_timeout)
+    if check_type == "mirth_api":
+        return run_mirth_api_check(section_name, cfg, default_timeout)
 
     result = _base_result(section_name, cfg)
     return _finalize(result, time.perf_counter(), "unknown", f"Unsupported check type: {check_type}")
