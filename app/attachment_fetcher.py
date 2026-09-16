@@ -109,14 +109,20 @@ def fetch_attachment(reqid, testid, source_url=None, save=True):
     filename = build_attachment_filename(reqid, testid)
     url = build_attachment_url(reqid, testid, source_url=source_url)
 
-    response = report_fetcher.session.get(url, timeout=45)
+    try:
+        response = report_fetcher.session.get(url, timeout=45)
+    except Exception as exc:
+        raise Exception(f"ATTACHMENT_FETCH_NETWORK_ERROR url={url}: {str(exc)}")
+
     if response.status_code != 200:
-        raise Exception(f"ATTACHMENT_FETCH_FAILED status={response.status_code}")
+        raise Exception(f"ATTACHMENT_FETCH_FAILED status={response.status_code} url={url} reason={response.reason or 'unknown'}")
 
     content_type = str(response.headers.get("Content-Type", "")).lower()
     content = response.content or b""
+    if not content:
+        raise Exception(f"ATTACHMENT_EMPTY_RESPONSE url={url}")
     if "application/pdf" not in content_type and not content.startswith(b"%PDF"):
-        raise Exception("ATTACHMENT_NOT_PDF")
+        raise Exception(f"ATTACHMENT_NOT_PDF url={url} content_type={content_type} bytes={len(content)}")
 
     if not save:
         return {

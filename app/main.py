@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pypdf import PdfReader, PdfWriter
 from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
-from app.report_status import fetch_report_status, fetch_report_status_by_reqid
+from app.lab_report_fetcher import get_lab_collated_report
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
+from app.labit_tools import LabitCoreReportNotFound, fetch_document, fetch_core_price_list
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -31,7 +33,7 @@ import os
 import configparser
 from pathlib import Path
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 config = configparser.ConfigParser()
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -59,6 +61,8 @@ class DeliveryStatusUpdateRequest(BaseModel):
     status: str
     channel: str
     message: str
+    scope: Optional[str] = "all"
+    testids: Optional[List[str]] = None
 
 
 class ShivamDemographicsUpdateRequest(BaseModel):
@@ -141,7 +145,20 @@ def _build_deny_payload(status_data):
     source_id = _first_non_empty_source_value(status_data, "source_id", "SOURCE_ID", "sourceid", "SOURCEID", "refdoctor", "REFDOCTOR")
     source_name = _first_non_empty_source_value(status_data, "source_name", "SOURCE_NAME", "sourcenm", "SOURCENM", "drname", "DRNAME")
 
-    if source_id and source_id in DO_NOT_SEND_SOURCE_IDS:
+    # labit-core computes confidentiality from labit_core.referrer.confidential
+    # and returns it on the status payload (dispatch_allowed / denial_code).
+    # Honour that so the flag has ONE source of truth (the labit_core column)
+    # across every path -- the bot, the auto-sender, direct PDF fetches --
+    # instead of relying on this separate labit-py deny-list staying in sync.
+    core_denied = (
+        isinstance(status_data, dict)
+        and (
+            status_data.get("dispatch_allowed") is False
+            or str(status_data.get("dispatch_denial_code") or "").upper()
+            == "SOURCE_CONFIDENTIAL_DO_NOT_SEND"
+        )
+    )
+    if core_denied or (source_id and source_id in DO_NOT_SEND_SOURCE_IDS):
         return {
             "dispatch_allowed": False,
             "code": "SOURCE_CONFIDENTIAL_DO_NOT_SEND",
@@ -160,15 +177,20 @@ def _build_deny_payload(status_data):
 
 
 def _require_dispatch_allowed(*, reqid=None, reqno=None, status_data=None):
-    if not DO_NOT_SEND_SOURCE_IDS:
-        return
-
     data = status_data
     if not isinstance(data, dict):
-        if reqid:
-            data = fetch_report_status_by_reqid(reqid)
-        elif reqno:
-            data = fetch_report_status(reqno)
+        # Resolve status -- the confidentiality signal can come from
+        # labit-core's referrer.confidential (on the status payload), not only
+        # this labit-py deny-list. A status lookup that fails (e.g. a
+        # pre-cutover archive reqid labit-core doesn't know) leaves data={} and
+        # falls through to the deny-list check, i.e. current behaviour.
+        try:
+            if reqid:
+                data = fetch_report_status_by_reqid(reqid)
+            elif reqno:
+                data = fetch_report_status(reqno)
+        except Exception:
+            data = {}
 
     deny = _build_deny_payload(data if isinstance(data, dict) else {})
     if not deny.get("dispatch_allowed", True):
@@ -356,12 +378,10 @@ def health():
 # -----------------------------
 @app.get("/lookup/{phone}")
 def lookup(phone):
-
-    rows = fetch_reqids(phone)
-
+    result = fetch_lookup(phone)
     return {
         "phone": phone,
-        "latest_reports": rows
+        "latest_reports": result.get("latest_reports", [])
     }
 
 
@@ -371,6 +391,7 @@ def lookup(phone):
 @app.get("/radiologyreport/{reqid}")
 def radiology_report(
     reqid,
+    reqno: Optional[str] = Query(default=None),
     header_mode: str = Query(default="default"),
     without_header_background: Optional[str] = Query(default=None)
 ):
@@ -380,7 +401,21 @@ def radiology_report(
             header_mode=header_mode,
             without_header_background=without_header_background
         )
-        path = get_radiology_report(reqid, apply_background_overlay=not plain)
+
+        # Archive-sourced rows carry a "archive:{reqid}" tag (dispatch_lookup_service's
+        # merge convention) -- meaningless to the OLD Shivam fetcher/status lookup,
+        # which has its own real, valid reqid for the same requisition. Strip it for
+        # the fallback path only; the labit-core branch (fetch_pdf_path, reqno-keyed)
+        # never sees this value at all.
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
+
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_radiology_report(shivam_reqid, apply_background_overlay=not plain),
+            scope="radiology",
+        )
 
         return FileResponse(
             path,
@@ -413,13 +448,90 @@ def report(
             chkrephead=chkrephead
         )
 
-        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
 
-        path = get_report(
-            reqid,
-            include_header=not plain,
-            printtype=printtype,
-            reqno=reqno
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
+
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_report(
+                shivam_reqid,
+                include_header=not plain,
+                printtype=printtype,
+                reqno=reqno,
+            ),
+        )
+
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=f"{reqid}.pdf"
+        )
+    except Exception as exc:
+        message = str(exc)
+        if message == "NO_PENDING_REPORTS":
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "NO_PENDING_REPORTS",
+                    "message": "No pending prints. Reports may already be dispatched via bot or agent, or no new reports are pending."
+                }
+            ) from exc
+
+        if message in {"PENDING_REPORT_NOT_AVAILABLE", "LAB_REPORT_NOT_AVAILABLE"}:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": message,
+                    "message": "Requested report is not available right now."
+                }
+            ) from exc
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "REPORT_FETCH_FAILED",
+                "message": message
+            }
+        ) from exc
+
+@app.get("/lab_report/{reqid}")
+def lab_collated_report(
+    reqid,
+    reqno: Optional[str] = Query(default=None),
+    printtype: str = Query(default="1"),
+    chkrephead: Optional[str] = Query(default=None),
+    header_mode: str = Query(default="default"),
+    without_header_background: Optional[str] = Query(default=None),
+    testids: Optional[str] = Query(default=None)
+):
+    try:
+        plain = _resolve_plain_mode(
+            header_mode=header_mode,
+            without_header_background=without_header_background,
+            chkrephead=chkrephead
+        )
+
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
+
+        # Parse testids if provided (comma-separated)
+        testid_list = None
+        if testids:
+            testid_list = [t.strip() for t in testids.split(",") if t.strip()]
+
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_lab_collated_report(
+                shivam_reqid,
+                include_header=not plain,
+                printtype=printtype,
+                reqno=reqno,
+                testid_filter=testid_list,
+            ),
+            scope="lab",
+            testids=",".join(testid_list) if testid_list else None,
         )
 
         return FileResponse(
@@ -471,14 +583,19 @@ def combined_report(
         chkrephead=chkrephead
     )
 
-    _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+    shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
 
-    path = get_combined_report(
-        reqid,
-        include_header=not plain,
-        apply_radiology_background=not plain,
-        printtype=printtype,
-        reqno=reqno
+    _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
+
+    path = fetch_pdf_path(
+        reqno,
+        lambda: get_combined_report(
+            shivam_reqid,
+            include_header=not plain,
+            apply_radiology_background=not plain,
+            printtype=printtype,
+            reqno=reqno,
+        ),
     )
 
     return FileResponse(
@@ -488,22 +605,50 @@ def combined_report(
     )
 
 # -----------------------------
+# Transactional document passthrough (e-bill / bill / estimate / receipt / ...)
+# for the patient-message-jobs framework. Thin proxy to labit-core's
+# /api/dispatch-status/documents/{kind}/{ref}; auth is server-to-server there.
+# -----------------------------
+@app.get("/document/{kind}/{ref}")
+def transactional_document(kind: str, ref: str, patient_dispatch: bool = Query(default=False)):
+    try:
+        content, ctype = fetch_document(kind, ref, patient_dispatch=patient_dispatch)
+    except LabitCoreReportNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={"endpoint": "document", "kind": kind, "ref": ref, "error": "not found"},
+        )
+    return Response(
+        content=content,
+        media_type=ctype or "application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{kind}-{ref}.pdf"'},
+    )
+
+
+# -----------------------------
 # Fetch latest report directly
 # -----------------------------
 @app.get("/latest-report/{phone}")
 def latest_report(phone):
 
-    rows = fetch_reqids(phone)
+    rows = fetch_lookup(phone).get("latest_reports", [])
 
     if not rows:
         return {"error": "No reports found"}
 
     reqid = rows[0]["reqid"]
+    reqno = rows[0].get("reqno")
+    # Archive-sourced rows carry a "archive:{reqid}" tag (dispatch_lookup_service's
+    # merge convention) -- meaningless to the OLD Shivam fetcher, which has
+    # its own real, valid reqid for the same requisition. Strip it for the
+    # fallback path only; the labit-core branch never sees this value at
+    # all (it's reqno-keyed).
+    shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
 
-    _require_dispatch_allowed(reqid=reqid)
+    _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
     try:
-        path = get_combined_report(reqid)
+        path = fetch_pdf_path(reqno, lambda: get_combined_report(shivam_reqid))
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"latest report unavailable: {exc}") from exc
 
@@ -517,14 +662,14 @@ def latest_report(phone):
 @app.get("/latest-report-meta/{phone}")
 def latest_report_meta(phone):
 
-    rows = fetch_reqids(phone)
+    rows = fetch_lookup(phone).get("latest_reports", [])
 
     if not rows:
         return {"error": "No reports found"}
 
-    reqid = rows[0]["reqid"]
+    reqno = rows[0].get("reqno")
 
-    data = fetch_report_status_by_reqid(reqid)
+    data = fetch_report_status(reqno)
 
     return _attach_dispatch_policy(data)
 
@@ -585,7 +730,7 @@ def delivery_requisitions_by_date(
 ):
 
     try:
-        return fetch_requisitions_by_date(date, org_id=org_id, org_ids=org_ids)
+        return fetch_requisitions_by_date_bb(date, org_id=org_id or None)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -688,7 +833,9 @@ def delivery_status_update(payload: DeliveryStatusUpdateRequest):
             payload.reqno,
             payload.status,
             payload.channel,
-            payload.message
+            payload.message,
+            scope=payload.scope or "all",
+            testids=payload.testids,
         )
     except Exception as exc:
         raise HTTPException(
@@ -712,7 +859,7 @@ def trend_data(
 ):
 
     try:
-        payload = fetch_trends_data(
+        payload = fetch_trend_data_bb(
             mrno,
             standardized=_is_truthy(standardized),
             psyntax_mode=str(psyntax_mode or "neutral").strip().lower(),
@@ -726,6 +873,15 @@ def trend_data(
                 "error": str(exc)
             }
         ) from exc
+
+    # labit-core answered explicitly that this patient is non-trendable
+    # (rapid / walk-in placeholder MRN). Pass that through as a 200 so the
+    # consumer can show "contact the lab for trend data reports" instead of
+    # treating it like an unknown MRN.
+    if isinstance(payload, dict) and payload.get("trend_available") is False:
+        if not _is_truthy(include_raw):
+            payload.pop("data", None)
+        return payload
 
     if int(payload.get("row_count", 0) or 0) == 0:
         raise HTTPException(
@@ -748,9 +904,35 @@ def trend_data(
 # -----------------------------
 @app.get("/trend-report/{mrno}")
 def trend_report(mrno):
+    # Primary: labit-core Report pipeline trends view (merged labit +
+    # archive parameter history) via /api/dispatch-status/documents/trend/
+    # {mrn}. Falls back to Shivam's globalreport webform only for a clean
+    # 404 (MRN unknown to labit-core) -- during cutover, never for a real
+    # error. A rapid/walk-in MRN is explicitly not trend-eligible; surface
+    # that rather than rendering an empty legacy report.
+    try:
+        content, ctype = fetch_document("trend", mrno, patient_dispatch=False)
+        return Response(
+            content=content,
+            media_type=ctype or "application/pdf",
+            headers={"Content-Disposition": f'inline; filename="trend_{mrno}.pdf"'},
+        )
+    except LabitCoreReportNotFound:
+        pass
+    except Exception as exc:
+        if "TREND_NOT_AVAILABLE_RAPID_PATIENT" in str(exc):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "endpoint": "trend-report",
+                    "mrno": mrno,
+                    "error": "TREND_NOT_AVAILABLE_RAPID_PATIENT",
+                    "message": "Please contact the lab for Trend Data reports.",
+                },
+            )
+        raise
 
     path = get_trend_report(mrno)
-
     return FileResponse(
         path,
         media_type="application/pdf",
@@ -815,6 +997,30 @@ def shivam_pricelist(lab_id: str = Query(default="")):
             detail={
                 "endpoint": "shivam/pricelist",
                 "lab_id": str(lab_id or "").strip(),
+                "error": str(exc)
+            }
+        ) from exc
+
+
+@app.get("/live-sync/pricelist")
+def live_sync_pricelist(price_list_id: str = Query(default="")):
+    """Replaces shivam_pricelist above as labit-main's Live Sync source
+    (director, 2026-09-14: "decouple from shivam and move to core... add
+    some other name like Native or something. Or Live Sync or some.").
+    labit-core is the source of truth going forward -- see
+    app.labit_tools.fetch_core_price_list's own docstring for the auth/
+    identity reasoning. shivam_pricelist is left in place, unused by
+    labit-main after this, rather than deleted -- no other known caller,
+    but removing a live route isn't this change's job."""
+    try:
+        clean_price_list_id = str(price_list_id or "").strip()
+        return {"items": fetch_core_price_list(clean_price_list_id or None)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "endpoint": "live-sync/pricelist",
+                "price_list_id": str(price_list_id or "").strip(),
                 "error": str(exc)
             }
         ) from exc
@@ -931,20 +1137,27 @@ def outsourced_attachment_meta(
 def outsourced_attachment(
     reqid: str = Query(...),
     testid: str = Query(...),
+    reqno: Optional[str] = Query(default=None),
     source_url: Optional[str] = Query(default=None)
 ):
-    try:
-        _require_dispatch_allowed(reqid=reqid)
+    result_filename = ["outsourced_attachment.pdf"]
+
+    def _old():
         payload = fetch_attachment(reqid, testid, source_url=source_url, save=True)
-        filename = str(payload.get("filename") or "outsourced_attachment.pdf")
+        result_filename[0] = str(payload.get("filename") or "outsourced_attachment.pdf")
         path = str(payload.get("path") or "").strip()
         if not path:
             raise Exception("ATTACHMENT_PATH_MISSING")
+        return path
+
+    try:
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+        path = fetch_outsourced_attachment_path(reqno, testid, _old)
 
         return FileResponse(
             path,
             media_type="application/pdf",
-            filename=filename
+            filename=result_filename[0]
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -994,6 +1207,7 @@ def outsourced_report_meta(
 def outsourced_report(
     reqid: str = Query(...),
     testid: str = Query(...),
+    reqno: Optional[str] = Query(default=None),
     source_url: Optional[str] = Query(default=None),
     qr_url: Optional[str] = Query(default=None),
     fallback_to_base: Optional[str] = Query(default="false"),
@@ -1002,7 +1216,21 @@ def outsourced_report(
     without_header_background: Optional[str] = Query(default=None)
 ):
     try:
-        _require_dispatch_allowed(reqid=reqid)
+        _require_dispatch_allowed(reqid=reqid, reqno=reqno)
+
+        def _core_old_fallback():
+            raise LabitCoreReportNotFound("fall through to legacy outsourced-report renderer")
+
+        try:
+            path = fetch_outsourced_attachment_path(reqno, testid, _core_old_fallback)
+            return FileResponse(
+                path,
+                media_type="application/pdf",
+                filename=f"OUTSOURCED_{reqid}_{testid}.pdf",
+            )
+        except LabitCoreReportNotFound:
+            pass
+
         payload = fetch_outsourced_report(
             reqid=reqid,
             testid=testid,

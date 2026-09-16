@@ -12,7 +12,7 @@ request_timeout_seconds = 8
 [group:internet_edge]
 run_on = local
 label = Internet / WAN
-services = mirth_lab,mirth_dicom,orthanc_main
+services = sophos_firewall,mirth_lab,mirth_dicom,orthanc_main
 failure_condition = all_down
 severity = critical
 message = Likely internet, VPN, or upstream network issue
@@ -68,6 +68,20 @@ run_on = local
 category = orthanc
 label = Orthanc Main
 url = http://100.84.172.71:8042/system
+method = GET
+username = radio
+password = radio
+expected_status = 200
+slow_threshold_ms = 2000
+interval_seconds = 120
+
+[service:orthanc_dell]
+type = http_json_auth
+enabled = 1
+run_on = local
+category = orthanc
+label = Orthanc Dell (Backup)
+url = http://100.100.21.90:8042/system
 method = GET
 username = radio
 password = radio
@@ -214,4 +228,18 @@ expected_status = 200
 slow_threshold_ms = 2000
 verify_ssl = 0
 header_x_requested_with = OpenAPI
+interval_seconds = 60
+
+# Sophos XG Firewall WAN monitoring
+[service:sophos_firewall]
+type = snmp_sophos
+enabled = 1
+run_on = local
+category = infrastructure
+label = Sophos XG106w WAN Status
+host = 192.168.134.1
+community = ENV:SOPHOS_SNMP_COMMUNITY
+version = 2c
+port = 161
+timeout_seconds = 8
 interval_seconds = 60

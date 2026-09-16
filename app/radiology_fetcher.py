@@ -3,7 +3,8 @@ import requests, configparser, json
 import subprocess
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
-from app.report_status import fetch_report_status, row_value, fetch_report_status_by_reqid
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid
+from app.report_status import row_value
 from app.pdf_utils import apply_background, merge_pdfs
 # -----------------------------
 # CONFIG
@@ -112,6 +113,14 @@ def get_radiology_files(reqid):
     for row in data["tests"]:
 
         if row_value(row, "GROUPID", "groupid") == "GDEP0002":
+
+            # Skip unapproved radiology tests
+            approved_flag = row_value(row, "APPROVEDFLG", "approvedflg")
+            report_status = row_value(row, "REPORT_STATUS", "report_status")
+
+            # Only include if approved (approvedflg=1) or report is RADIOLOGY_READY
+            if str(approved_flag) != "1" and str(report_status) != "RADIOLOGY_READY":
+                continue
 
             testid = row_value(row, "TESTID", "testid")
 
