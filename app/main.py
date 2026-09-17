@@ -629,7 +629,18 @@ def transactional_document(kind: str, ref: str, patient_dispatch: bool = Query(d
 # Fetch latest report directly
 # -----------------------------
 @app.get("/latest-report/{phone}")
-def latest_report(phone):
+def latest_report(phone, include_trends: bool = Query(default=False)):
+    """Director, 2026-09-16: "include_trends=true ... generate the same
+    latest report PDF but pass include_trends=True into the dispatch PDF/
+    render path. Trends must be patient-facing scoped to 3 years only. If
+    source is archive/legacy and trends cannot be generated, degrade
+    gracefully to normal latest report PDF." The 3-year cutoff is applied
+    labit-core-side (dispatch_status.py's /pdf route, server-to-server
+    only, always caps at 3 years when trends are requested at all) --
+    this route just forwards the flag. The archive-fallback branch
+    (get_combined_report, a genuine pre-cutover reqno) has no trends
+    concept at all -- fetch_pdf_path's old_fn() never receives this flag,
+    so a legacy requisition transparently degrades to the plain report."""
 
     rows = fetch_lookup(phone).get("latest_reports", [])
 
@@ -648,7 +659,8 @@ def latest_report(phone):
     _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
     try:
-        path = fetch_pdf_path(reqno, lambda: get_combined_report(shivam_reqid))
+        path = fetch_pdf_path(
+            reqno, lambda: get_combined_report(shivam_reqid), include_trends=include_trends)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"latest report unavailable: {exc}") from exc
 

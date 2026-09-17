@@ -68,7 +68,7 @@ def fetch_report_status_by_reqid(reqid):
         return report_status.fetch_report_status_by_reqid(reqid)
 
 
-def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
+def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=False):
     """Drop-in replacement for main.py's PDF-fetching routes (/report,
     /reports, /radiologyreport, /lab_report -- the full sweep, 2026-08-30)
     -- report_sender_worker.py (py_utils, confirmed same
@@ -102,7 +102,16 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
     (include_header/apply_radiology_background/printtype) have no
     labit-core equivalent -- its own PDF already applies its own unified
     header/letterhead/background rules, so they're simply not passed
-    through on that path, not silently misapplied."""
+    through on that path, not silently misapplied.
+
+    `include_trends`, director 2026-09-16 (main.py's /latest-report/{phone}
+    ?include_trends=true): threaded straight into labit_tools.fetch_dispatch_pdf,
+    which already supported it. On the labit-core-native branch this
+    renders the report with an embedded, patient-facing-scoped (3-year
+    cutoff, applied labit-core-side) trend section. On the archive-fallback
+    branch (old_fn(), a genuine pre-cutover reqno) there is no equivalent --
+    old_fn() never sees this flag at all, an honest degrade to the normal
+    report rather than erroring or silently ignoring the request."""
     if not _labit_core_enabled() or not reqno:
         return old_fn()
     # 2026-09-03: short-TTL cache in front of the live labit-core call -- see
@@ -115,11 +124,13 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None):
         str(reqno).strip(),
         str(scope or "all").strip(),
         ",".join(sorted(testids)) if testids else "",
+        "trends" if include_trends else "",
     ])
     try:
         pdf_bytes = pdf_cache.get_or_render(
             cache_key,
-            lambda: labit_tools.fetch_dispatch_pdf(reqno, scope=scope, testids=testids),
+            lambda: labit_tools.fetch_dispatch_pdf(
+                reqno, scope=scope, testids=testids, include_trends=include_trends),
         )
     except LabitCoreReportNotFound:
         return old_fn()
