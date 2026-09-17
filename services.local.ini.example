@@ -173,6 +173,23 @@ path = /var/tmp/fetchreports/dicom_worker_heartbeat.json
 max_age_seconds = 300
 interval_seconds = 30
 
+[service:dicom_export_cr]
+# The new Python CR film-consolidation worker (pm2 dicom-export-cr, port
+# 8086) that replaced Labit ORTHANC_Export's Mirth CR branch on 2026-09-17.
+# /health reports richer state (last_poll_ok, dry_run, ct_enabled,
+# cr_sent_total) than this check surfaces -- this only validates the HTTP
+# server itself responds; read the endpoint directly for cycle-level detail.
+type = http_json
+enabled = 1
+run_on = local
+category = python
+label = DICOM Export (CR)
+url = http://100.103.168.62:8086/health
+method = GET
+expected_status = 200
+slow_threshold_ms = 3000
+interval_seconds = 60
+
 # Mirth channel-level monitoring stubs (local)
 [service:mirth_channel_01]
 type = http_json
