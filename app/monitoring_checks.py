@@ -8,7 +8,8 @@ import requests
 import xml.etree.ElementTree as ET
 
 try:
-    from pysnmp.hlapi import getCmd, ObjectType, ObjectIdentity, SnmpEngine, CommunityData, UdpTransportTarget, ContextData
+    from pysnmp.hlapi import bulkCmd, getCmd, ObjectType, ObjectIdentity, SnmpEngine, CommunityData, UdpTransportTarget, ContextData
+    from pysnmp.proto.rfc1905 import endOfMibView
     SNMP_AVAILABLE = True
 except ImportError:
     SNMP_AVAILABLE = False
@@ -319,19 +320,35 @@ def _snmp_get(engine, host, community, version, port, timeout, oid):
 
 
 def _snmp_walk(engine, host, community, version, port, timeout, oid_base):
-    """Walk SNMP subtree."""
+    """Walk SNMP subtree.
+
+    bulkCmd is a pysnmp.hlapi module-level function (not a method on
+    SnmpEngine -- calling engine.bulkCmd(...) raises AttributeError, silently
+    swallowed by the except below, which is why this always returned {} and
+    every WAN read as down before this was tested against the real device).
+    lexicographicMode=False stops GETBULK at the requested subtree's boundary
+    instead of walking the entire rest of the device's MIB (confirmed live:
+    without it, one call for ifDescr walks straight through ifTable's other
+    columns and into Sophos's enterprise MIB). The final GETBULK response
+    also carries an endOfMibView sentinel that reuses the last real OID with
+    a garbage value -- must be filtered or it overwrites that row.
+    """
     try:
         result = {}
-        for errorIndication, errorStatus, errorIndex, varBinds in engine.bulkCmd(
+        for errorIndication, errorStatus, errorIndex, varBinds in bulkCmd(
+            engine,
             CommunityData(community, mpModel=0 if version == "1" else 1),
             UdpTransportTarget((host, port), timeout=timeout),
             ContextData(),
             0, 25,
-            ObjectType(ObjectIdentity(oid_base))
+            ObjectType(ObjectIdentity(oid_base)),
+            lexicographicMode=False
         ):
             if errorIndication:
                 break
             for oid, val in varBinds:
+                if val.isSameTypeWith(endOfMibView):
+                    continue
                 result[str(oid)] = val
         return result
     except Exception:

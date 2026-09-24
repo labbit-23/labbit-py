@@ -7,5 +7,10 @@ opencv-python-headless
 PyMuPDF
 numpy
 reportlab
-pysnmp
+# pysnmp>=6 dropped the sync pysnmp.hlapi.getCmd/bulkCmd API monitoring_checks.py
+# uses (full async rewrite) -- pin below that. pysnmp 5.x also needs an older
+# pyasn1 (pyasn1.compat.octets was removed in 0.5+). Verified live against the
+# real Sophos box 2026-09-24 with this exact pin.
+pysnmp<6
+pyasn1<0.5.0
 paramiko
