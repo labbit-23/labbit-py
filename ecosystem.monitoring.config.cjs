@@ -27,7 +27,12 @@ module.exports = {
         MONITORING_SERVICES_INI: "/opt/labbit-py/services.local.ini",
         MONITORING_LOG_PATH: "/opt/labbit-py/logs/monitoring-local.log",
         MONITORING_NODE_ROLE: "local",
-        CTO_INGEST_TOKEN: ""
+        CTO_INGEST_TOKEN: "",
+        // Sophos SNMP WAN check ([service:sophos_firewall] in
+        // services.local.ini) + its WhatsApp transition alert -- fill these
+        // in directly on the deployed box, never commit real values here.
+        SOPHOS_SNMP_COMMUNITY: "",
+        WHATSAPP_INTERNAL_SEND_TOKEN: ""
       }
     }
   ]

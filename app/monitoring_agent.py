@@ -3,8 +3,10 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import requests
 
 from app.monitoring_checks import run_check
 from app.monitoring_writer import MonitoringWriter
@@ -12,10 +14,118 @@ from app.monitoring_writer import MonitoringWriter
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SERVICES_CONFIG_PATH = os.environ.get("MONITORING_SERVICES_INI", str(ROOT_DIR / "services.ini"))
 LOG_PATH = os.environ.get("MONITORING_LOG_PATH", str(ROOT_DIR / "logs" / "monitoring.log"))
+ALERT_STATE_PATH = os.environ.get("MONITORING_ALERT_STATE_PATH", str(ROOT_DIR / "logs" / "wan_alert_state.json"))
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_ist_str():
+    return datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
+
+
+def _load_alert_state():
+    try:
+        with open(ALERT_STATE_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_alert_state(state):
+    os.makedirs(os.path.dirname(ALERT_STATE_PATH) or ".", exist_ok=True)
+    with open(ALERT_STATE_PATH, "w") as f:
+        json.dump(state, f)
+
+
+def _send_wan_alert(monitoring_cfg, wan_label, firewall_label, new_status):
+    notify_url = monitoring_cfg.get("alert_notify_url", "").strip()
+    notify_token = monitoring_cfg.get("alert_notify_token", "").strip()
+    if not notify_url or not notify_token:
+        logging.warning("WAN alert skipped for %s (%s): alert_notify_url/alert_notify_token not configured", wan_label, new_status)
+        return
+
+    template_name = monitoring_cfg.get("alert_template_name", "wan_status_alert").strip()
+    language_code = monitoring_cfg.get("alert_language_code", "en").strip()
+    lab_id = monitoring_cfg.get("alert_lab_id", "").strip() or monitoring_cfg.get("lab_id", "").strip()
+
+    try:
+        response = requests.post(
+            notify_url,
+            json={
+                "lab_id": lab_id,
+                "template_name": template_name,
+                "language_code": language_code,
+                "template_params": [wan_label, new_status, firewall_label, now_ist_str()],
+                "source_service": "sophos-wan-monitor",
+            },
+            headers={"x-internal-token": notify_token},
+            timeout=10,
+        )
+        if response.status_code >= 300:
+            logging.error("WAN alert send failed (%s): %s", response.status_code, response.text[:300])
+        else:
+            logging.info("WAN alert sent: %s is now %s", wan_label, new_status)
+    except Exception as exc:
+        logging.exception("WAN alert send raised: %s", exc)
+
+
+def maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg):
+    """Fire a WhatsApp alert when a monitored WAN's link state flips.
+
+    Opt-in per service (alert_on_wan_change=1 in its services.ini section) so
+    this only ever fires for checks the operator explicitly wants alerted --
+    scoped this way rather than sniffing any payload that happens to contain
+    a "wans" key. State survives process restarts via ALERT_STATE_PATH so a
+    monitoring_agent restart never fires a false "just went down/up" alert
+    for state that hasn't actually changed.
+    """
+    if str(cfg.get("alert_on_wan_change", "0")).strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+
+    payload = check_result.get("payload") or {}
+    service_key = check_result.get("service_key", "unknown")
+    firewall_label = (payload.get("firewall") or {}).get("name") or check_result.get("label", service_key)
+    wans = payload.get("wans")
+
+    state = _load_alert_state()
+    changed = False
+
+    if wans:
+        for wan in wans:
+            wan_key = f"{service_key}:{wan.get('interface') or wan.get('name')}"
+            current_up = bool(wan.get("link_up"))
+            previous = state.get(wan_key)
+            if previous is None:
+                state[wan_key] = current_up
+                changed = True
+                continue
+            if previous != current_up:
+                _send_wan_alert(monitoring_cfg, wan.get("name", wan_key), firewall_label,
+                                 "RESTORED" if current_up else "DOWN")
+                state[wan_key] = current_up
+                changed = True
+    else:
+        # SNMP/firewall itself unreachable -- no per-WAN detail available,
+        # but this is exactly the "can't see it at all" case that also
+        # deserves a page.
+        reach_key = f"{service_key}:__reachable__"
+        current_ok = check_result.get("status") == "healthy"
+        previous = state.get(reach_key)
+        if previous is None:
+            state[reach_key] = current_ok
+            changed = True
+        elif previous != current_ok:
+            _send_wan_alert(monitoring_cfg, f"{firewall_label} (SNMP unreachable)", firewall_label,
+                             "RESTORED" if current_ok else "DOWN")
+            state[reach_key] = current_ok
+            changed = True
+
+    if changed:
+        _save_alert_state(state)
 
 
 def configure_logging():
@@ -123,6 +233,7 @@ def build_payload(config):
         if not should_run_entry(cfg, node_role):
             continue
         check_result = run_check(section_name, cfg, default_timeout)
+        maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg)
         services.append(append_node_role_to_service_key(check_result, node_role))
 
     group_definitions = load_group_definitions(config, node_role)
@@ -180,6 +291,7 @@ def build_due_payload(config, last_run_by_service=None, now_monotonic=None):
             continue
 
         check_result = run_check(section_name, cfg, default_timeout)
+        maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg)
         services.append(append_node_role_to_service_key(check_result, node_role))
         ran_sections.append(section_name)
 

@@ -7,3 +7,5 @@ opencv-python-headless
 PyMuPDF
 numpy
 reportlab
+pysnmp
+paramiko

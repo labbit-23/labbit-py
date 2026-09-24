@@ -9,6 +9,13 @@ interval_seconds = 60
 scheduler_tick_seconds = 15
 request_timeout_seconds = 8
 
+# WAN-transition alerting (WhatsApp) -- see [service:sophos_firewall]'s
+# alert_on_wan_change flag below. Notify route lives in labit-main.
+alert_notify_url = https://lab.sdrc.in/api/internal/whatsapp/staff-notify
+alert_notify_token = ENV:WHATSAPP_INTERNAL_SEND_TOKEN
+alert_template_name = wan_status_alert
+alert_language_code = en
+
 [group:internet_edge]
 run_on = local
 label = Internet / WAN
@@ -243,3 +250,6 @@ version = 2c
 port = 161
 timeout_seconds = 8
 interval_seconds = 60
+# Fire a WhatsApp alert (see [monitoring].alert_* above) on every up<->down
+# transition of Port2/Port4, plus if SNMP/the firewall itself goes unreachable.
+alert_on_wan_change = 1
