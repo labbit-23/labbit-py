@@ -41,14 +41,19 @@ def _save_alert_state(state):
         json.dump(state, f)
 
 
-def _send_wan_alert(monitoring_cfg, wan_label, firewall_label, new_status):
+def _send_ops_alert(monitoring_cfg, category, subject, status):
+    """POST to labit-main's staff-notify using the generic ops_status_alert
+    WhatsApp template (Category/Subject/Status/Time), approved 2026-09
+    specifically to be reused across alert types -- not WAN-specific despite
+    this module's only caller today being the Sophos check.
+    """
     notify_url = monitoring_cfg.get("alert_notify_url", "").strip()
     notify_token = monitoring_cfg.get("alert_notify_token", "").strip()
     if not notify_url or not notify_token:
-        logging.warning("WAN alert skipped for %s (%s): alert_notify_url/alert_notify_token not configured", wan_label, new_status)
+        logging.warning("Ops alert skipped for %s: %s (%s): alert_notify_url/alert_notify_token not configured", category, subject, status)
         return
 
-    template_name = monitoring_cfg.get("alert_template_name", "wan_status_alert").strip()
+    template_name = monitoring_cfg.get("alert_template_name", "ops_status_alert").strip()
     language_code = monitoring_cfg.get("alert_language_code", "en").strip()
     lab_id = monitoring_cfg.get("alert_lab_id", "").strip() or monitoring_cfg.get("lab_id", "").strip()
 
@@ -59,18 +64,18 @@ def _send_wan_alert(monitoring_cfg, wan_label, firewall_label, new_status):
                 "lab_id": lab_id,
                 "template_name": template_name,
                 "language_code": language_code,
-                "template_params": [wan_label, new_status, firewall_label, now_ist_str()],
+                "template_params": [category, subject, status, now_ist_str()],
                 "source_service": "sophos-wan-monitor",
             },
             headers={"x-internal-token": notify_token},
             timeout=10,
         )
         if response.status_code >= 300:
-            logging.error("WAN alert send failed (%s): %s", response.status_code, response.text[:300])
+            logging.error("Ops alert send failed (%s): %s", response.status_code, response.text[:300])
         else:
-            logging.info("WAN alert sent: %s is now %s", wan_label, new_status)
+            logging.info("Ops alert sent: %s / %s is now %s", category, subject, status)
     except Exception as exc:
-        logging.exception("WAN alert send raised: %s", exc)
+        logging.exception("Ops alert send raised: %s", exc)
 
 
 def maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg):
@@ -104,7 +109,8 @@ def maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg):
                 changed = True
                 continue
             if previous != current_up:
-                _send_wan_alert(monitoring_cfg, wan.get("name", wan_key), firewall_label,
+                _send_ops_alert(monitoring_cfg, "Infrastructure",
+                                 f"{wan.get('name', wan_key)} ({firewall_label})",
                                  "RESTORED" if current_up else "DOWN")
                 state[wan_key] = current_up
                 changed = True
@@ -119,7 +125,8 @@ def maybe_alert_wan_transitions(check_result, cfg, monitoring_cfg):
             state[reach_key] = current_ok
             changed = True
         elif previous != current_ok:
-            _send_wan_alert(monitoring_cfg, f"{firewall_label} (SNMP unreachable)", firewall_label,
+            _send_ops_alert(monitoring_cfg, "Infrastructure",
+                             f"{firewall_label} (SNMP unreachable)",
                              "RESTORED" if current_ok else "DOWN")
             state[reach_key] = current_ok
             changed = True

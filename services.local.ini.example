@@ -13,7 +13,7 @@ request_timeout_seconds = 8
 # alert_on_wan_change flag below. Notify route lives in labit-main.
 alert_notify_url = https://lab.sdrc.in/api/internal/whatsapp/staff-notify
 alert_notify_token = ENV:WHATSAPP_INTERNAL_SEND_TOKEN
-alert_template_name = wan_status_alert
+alert_template_name = ops_status_alert
 alert_language_code = en
 
 [group:internet_edge]
