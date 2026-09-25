@@ -253,3 +253,14 @@ interval_seconds = 60
 # Fire a WhatsApp alert (see [monitoring].alert_* above) on every up<->down
 # transition of Port2/Port4, plus if SNMP/the firewall itself goes unreachable.
 alert_on_wan_change = 1
+
+# WAN Link Manager (WebAdmin) config, mirrored here since SNMP doesn't expose
+# gateway names on this firmware -- update per-site to match your own WAN
+# Link Manager (Port names, IPs/gateways, and ISP names all vary per install).
+wan_ports = Port2,Port4
+wan_port2_ip = 192.168.1.75
+wan_port2_gateway = 192.168.1.1
+wan_port2_provider = ISP_ONE_NAME_HERE
+wan_port4_ip = 192.168.37.6
+wan_port4_gateway = 192.168.37.1
+wan_port4_provider = ISP_TWO_NAME_HERE

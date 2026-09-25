@@ -276,7 +276,7 @@ def run_snmp_sophos_check(section_name, cfg, default_timeout):
         uptime_str = _format_uptime(sys_uptime) if sys_uptime else "unknown"
 
         # Build WAN interfaces
-        wans = _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out)
+        wans = _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out, cfg)
 
         payload = {
             "firewall": {
@@ -367,15 +367,43 @@ def _format_uptime(uptime_val):
         return str(uptime_val)
 
 
-def _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out):
-    """Extract Port2 and Port4 from SNMP interface tree."""
+def _parse_wan_config(cfg):
+    """Read the configured WAN ports (interface -> ip/gateway/provider) from
+    services.ini instead of hardcoding them -- confirmed live 2026-09-25 that
+    Sophos's SNMP agent doesn't expose the WAN Link Manager's configured
+    gateway name on this firmware (walked the full Sophos enterprise MIB,
+    1.3.6.1.4.1.21067, 71 OIDs total, and the legacy Astaro MIB,
+    1.3.6.1.4.1.2604 -- neither has it; only Sophos's REST/XML API exposes
+    GatewayName, needing separate API-user credentials not worth standing up
+    for two static labels), so the provider name has to come from config.
+
+    services.ini keys, per configured wan_ports entry (e.g. "Port2"):
+      wan_port2_ip = 192.168.1.75
+      wan_port2_gateway = 192.168.1.1
+      wan_port2_provider = Airtel
+    """
+    wan_config = {}
+    port_names = [p.strip() for p in cfg.get("wan_ports", "").split(",") if p.strip()]
+    for port_name in port_names:
+        prefix = f"wan_{port_name.lower()}_"
+        wan_config[port_name] = {
+            "ip": cfg.get(f"{prefix}ip", "").strip(),
+            "gateway": cfg.get(f"{prefix}gateway", "").strip(),
+            "provider": cfg.get(f"{prefix}provider", "").strip() or port_name,
+        }
+    return wan_config
+
+
+def _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out, cfg):
+    """Extract the configured WAN ports from the SNMP interface tree."""
     wans = []
     wan_map = {}
+    wan_config = _parse_wan_config(cfg)
 
     # Build name -> status mapping
     for oid_str, name_val in if_descr_tree.items():
         name = str(name_val).strip()
-        if name in {"Port2", "Port4"}:
+        if name in wan_config:
             idx = oid_str.split(".")[-1]
             wan_map[name] = {"index": idx, "link_up": False}
 
@@ -400,16 +428,10 @@ def _build_wan_interfaces(if_descr_tree, if_status_tree, if_hc_in, if_hc_out):
             if info["index"] == idx:
                 info["tx_bytes"] = int(bytes_val) if bytes_val else 0
 
-    # Build output for Port2 and Port4
-    wan_config = {
-        "Port2": {"ip": "192.168.1.75", "gateway": "192.168.1.1"},
-        "Port4": {"ip": "192.168.37.6", "gateway": "192.168.37.1"}
-    }
-
     for name, config in wan_config.items():
         info = wan_map.get(name, {})
         wans.append({
-            "name": f"WAN {name}",
+            "name": f"{config['provider']} (WAN {name})",
             "interface": name,
             "ip": config["ip"],
             "gateway": config["gateway"],
