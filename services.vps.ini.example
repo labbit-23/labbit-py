@@ -99,6 +99,29 @@ expected_status = 200
 slow_threshold_ms = 2000
 interval_seconds = 300
 
+[service:funnel_mirth_health]
+type = http_json
+enabled = 1
+run_on = vps
+category = public_ingress
+label = Funnel Public Ingress
+# 2026-09-27: only meaningful from a VPS, never from "local" -- the local
+# machine is itself Tailscale-joined and resolves *.ts.net hostnames over
+# the private tailnet mesh (a false-positive "reachable" even if the real
+# public Funnel ingress is broken). VPS1/VPS2 have no tailscale client, so
+# this genuinely exercises the public path. Deliberately pinned to run
+# from exactly one VPS (not "both") -- one confirmed-external check is
+# enough, no need to duplicate. /health has no nginx location of its own
+# and falls through to "/", which is wired to a decommissioned Frappe
+# service nobody wants running again -- /radiology/ is the real, live,
+# basic-auth-protected endpoint; 401 is what a healthy hit on it looks
+# like, not a failure.
+url = https://sdrc-integrations.tail950b5e.ts.net/radiology/
+method = GET
+expected_status = 401
+slow_threshold_ms = 2000
+interval_seconds = 60
+
 [service:oracle_db]
 type = tcp
 enabled = 1
