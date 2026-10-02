@@ -68,7 +68,7 @@ def fetch_report_status_by_reqid(reqid):
         return report_status.fetch_report_status_by_reqid(reqid)
 
 
-def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=False):
+def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=False, letterhead=None):
     """Drop-in replacement for main.py's PDF-fetching routes (/report,
     /reports, /radiologyreport, /lab_report -- the full sweep, 2026-08-30)
     -- report_sender_worker.py (py_utils, confirmed same
@@ -111,7 +111,16 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=F
     cutoff, applied labit-core-side) trend section. On the archive-fallback
     branch (old_fn(), a genuine pre-cutover reqno) there is no equivalent --
     old_fn() never sees this flag at all, an honest degrade to the normal
-    report rather than erroring or silently ignoring the request."""
+    report rather than erroring or silently ignoring the request.
+
+    `letterhead` (2026-10-02): now a real passthrough -- labit-core's
+    dispatch-status/pdf route gained this param the same day, closing the
+    gap this docstring used to describe ("not passed through on that
+    path"). None (default, every existing caller) sends nothing and keeps
+    prior behavior exactly; only a caller explicitly wanting plain/no-
+    letterhead (the kiosk print routes) passes True/False. No equivalent on
+    the archive-fallback branch, same honest-degrade stance as the other
+    flags above."""
     if not _labit_core_enabled() or not reqno:
         return old_fn()
     # 2026-09-03: short-TTL cache in front of the live labit-core call -- see
@@ -125,13 +134,42 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=F
         str(scope or "all").strip(),
         ",".join(sorted(testids)) if testids else "",
         "trends" if include_trends else "",
+        "" if letterhead is None else ("letterhead" if letterhead else "plain"),
     ])
     try:
         pdf_bytes = pdf_cache.get_or_render(
             cache_key,
             lambda: labit_tools.fetch_dispatch_pdf(
-                reqno, scope=scope, testids=testids, include_trends=include_trends),
+                reqno, scope=scope, testids=testids, include_trends=include_trends,
+                letterhead=letterhead),
         )
+    except LabitCoreReportNotFound:
+        return old_fn()
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(pdf_bytes)
+        return tmp.name
+
+
+def fetch_latest_visit_pdf(phone, old_fn, *, include_trends=False):
+    """User, 2026-09-27: "one test addition in a new requisition is not
+    automatically the latest but the day's" -- /latest-report/{phone} used
+    to blindly take the single most-recently-created requisition (rows[0]),
+    so a same-day add-on test hid the rest of that day's reports. Only
+    meaningful on the labit_core-native branch (labit-core's own
+    dispatch_lookup_service.render_latest_visit_pdf() does the same-day
+    visit grouping) -- an archive-sourced row has no visit concept, so
+    `old_fn` (the exact old single-reqid Shivam call) stays the answer for
+    that source, unchanged, same posture every other archive-fallback
+    branch here already takes.
+
+    `old_fn` is a zero-arg callable the caller pre-binds to
+    `get_combined_report(shivam_reqid)`, matching fetch_pdf_path's own
+    convention above. Returns a FILE PATH, matching the existing
+    FileResponse contract main.py's route already uses."""
+    if not _labit_core_enabled() or not phone:
+        return old_fn()
+    try:
+        pdf_bytes = labit_tools.fetch_latest_visit_pdf(phone, include_trends=include_trends)
     except LabitCoreReportNotFound:
         return old_fn()
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:

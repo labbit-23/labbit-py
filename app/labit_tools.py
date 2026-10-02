@@ -163,13 +163,20 @@ def fetch_lookup(phone):
     return _get(f"/api/dispatch-lookup/{phone}")
 
 
-def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
+def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False, letterhead=None):
     """Drop-in replacement for report_fetcher.get_report()-family calls --
     labit-core's /api/dispatch-status/{reqno}/pdf now black-boxes core vs
     archive rendering itself (2026-08-30: "Make labit-core handle the
     black-boxing?"), so this needs no separate Shivam-fallback branch --
     once the cutover flag is on, labit-core alone is a complete answer for
-    BOTH a new and a legacy reqno. Returns raw PDF bytes."""
+    BOTH a new and a legacy reqno. Returns raw PDF bytes.
+
+    letterhead (2026-10-02): optional passthrough to labit-core's own
+    `letterhead` query param (added same day) -- None (default) sends
+    nothing and preserves the exact prior behavior for every existing
+    caller (enqueue worker, sender worker, etc). Only a caller that
+    explicitly wants plain/no-letterhead (the kiosk print path) passes
+    True/False."""
     if not LABIT_CORE_BASE_URL:
         raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
     params = {"scope": scope}
@@ -177,6 +184,8 @@ def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
         params["testids"] = testids if isinstance(testids, str) else ",".join(testids)
     if include_trends:
         params["include_trends"] = "true"
+    if letterhead is not None:
+        params["letterhead"] = "true" if letterhead else "false"
     url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/{reqno}/pdf"
     try:
         r = requests.get(url, params=params, auth=_auth(), timeout=(3, 30))
@@ -186,6 +195,29 @@ def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False):
         raise LabitCoreReportNotFound(f"labit-core dispatch PDF: unknown requisition for {reqno}")
     if not r.ok:
         raise Exception(f"labit-core dispatch PDF API failed: {r.status_code} {r.text[:500]}")
+    return r.content
+
+
+def fetch_latest_visit_pdf(phone, include_trends=False):
+    """labit-core's GET /api/dispatch-lookup/{phone}/latest-report/pdf --
+    one combined PDF for every requisition in the patient's most recent
+    visit-day (2026-09-27: a same-day add-on requisition no longer hides
+    the rest of that day's reports). Only meaningful for a labit_core-
+    sourced lookup row -- see main.py's /latest-report/{phone} route for
+    the source check that decides when to call this vs. the legacy
+    single-reqno Shivam path. Returns raw PDF bytes."""
+    if not LABIT_CORE_BASE_URL:
+        raise Exception("LABIT_CORE_BASE_URL must be set in the environment to call labit_tools.")
+    params = {"include_trends": "true"} if include_trends else None
+    url = f"{LABIT_CORE_BASE_URL}/api/dispatch-lookup/{phone}/latest-report/pdf"
+    try:
+        r = requests.get(url, params=params, auth=_auth(), timeout=(3, 30))
+    except requests.RequestException as exc:
+        raise Exception(f"labit-core latest-visit PDF call failed: {exc}") from exc
+    if r.status_code == 404:
+        raise LabitCoreReportNotFound(f"labit-core latest-visit PDF: no reports found for {phone}")
+    if not r.ok:
+        raise Exception(f"labit-core latest-visit PDF API failed: {r.status_code} {r.text[:500]}")
     return r.content
 
 

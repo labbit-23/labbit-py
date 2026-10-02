@@ -7,7 +7,7 @@ from app.radiology_fetcher import get_radiology_report
 from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
-from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path
+from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path, fetch_latest_visit_pdf
 from app.labit_tools import LabitCoreReportNotFound, fetch_document, fetch_core_price_list
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
@@ -415,6 +415,11 @@ def radiology_report(
             reqno,
             lambda: get_radiology_report(shivam_reqid, apply_background_overlay=not plain),
             scope="radiology",
+            # 2026-10-02: only force letterhead=False when plain was
+            # explicitly requested -- None (plain=False, the common case)
+            # keeps labit-core's own default (True for radiology) exactly
+            # as before this param existed.
+            letterhead=False if plain else None,
         )
 
         return FileResponse(
@@ -460,6 +465,11 @@ def report(
                 printtype=printtype,
                 reqno=reqno,
             ),
+            # 2026-10-02: same as radiologyreport above -- only force
+            # letterhead=False when plain was explicitly requested; None
+            # (the common case) preserves labit-core's stored per-report
+            # letterhead flag exactly as before.
+            letterhead=False if plain else None,
         )
 
         return FileResponse(
@@ -494,6 +504,40 @@ def report(
                 "message": message
             }
         ) from exc
+
+@app.get("/special_report/{reqid}")
+def special_report(
+    reqid,
+    reqno: Optional[str] = Query(default=None),
+    header_mode: str = Query(default="default"),
+    without_header_background: Optional[str] = Query(default=None),
+    chkrephead: Optional[str] = Query(default=None),
+):
+    """2026-09-27: outsourced/special-department content (attached-PDF or
+    transcribed) + T&C + dispatch sheet, isolated from every other report --
+    see labit-core delivery_service.render_dispatch_pdf's scope="special".
+    Brand-new labit-core-only concept (no Shivam ever had this split), so
+    there is no legacy old_fn to fall back to -- degrades honestly with a
+    clear error rather than pretending an old-Shivam equivalent exists.
+    fetch_pdf_path 404s (LabitCoreReportNotFound -> archive fallback) or
+    422s (nothing special ready) exactly as the other scoped routes do."""
+    try:
+        plain = _resolve_plain_mode(
+            header_mode=header_mode,
+            without_header_background=without_header_background,
+            chkrephead=chkrephead
+        )
+        shivam_reqid = reqid.split(":", 1)[-1] if reqid.startswith("archive:") else reqid
+        _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
+
+        def _no_legacy_special():
+            raise Exception("SPECIAL_SCOPE_REQUIRES_LABIT_CORE")
+
+        path = fetch_pdf_path(reqno, _no_legacy_special, scope="special")
+        return FileResponse(path, media_type="application/pdf", filename=f"{reqid}.pdf")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 @app.get("/lab_report/{reqid}")
 def lab_collated_report(
@@ -532,6 +576,7 @@ def lab_collated_report(
             ),
             scope="lab",
             testids=",".join(testid_list) if testid_list else None,
+            letterhead=False if plain else None,
         )
 
         return FileResponse(
@@ -640,7 +685,16 @@ def latest_report(phone, include_trends: bool = Query(default=False)):
     this route just forwards the flag. The archive-fallback branch
     (get_combined_report, a genuine pre-cutover reqno) has no trends
     concept at all -- fetch_pdf_path's old_fn() never receives this flag,
-    so a legacy requisition transparently degrades to the plain report."""
+    so a legacy requisition transparently degrades to the plain report.
+
+    User, 2026-09-27: "one test addition in a new requisition is not
+    automatically the latest but the day's" -- rows[0] used to always mean
+    ONE requisition's PDF, hiding the rest of that patient's same-day
+    visit. For a labit_core-sourced row (lookup_by_phone()'s "source" tag),
+    fetch_latest_visit_pdf() calls labit-core's own visit-grouped combined
+    PDF instead; an archive-sourced row has no visit concept in labit-core
+    (pre-cutover data), so it keeps the exact old single-requisition
+    behavior unchanged."""
 
     rows = fetch_lookup(phone).get("latest_reports", [])
 
@@ -649,6 +703,7 @@ def latest_report(phone, include_trends: bool = Query(default=False)):
 
     reqid = rows[0]["reqid"]
     reqno = rows[0].get("reqno")
+    source = rows[0].get("source")
     # Archive-sourced rows carry a "archive:{reqid}" tag (dispatch_lookup_service's
     # merge convention) -- meaningless to the OLD Shivam fetcher, which has
     # its own real, valid reqid for the same requisition. Strip it for the
@@ -659,8 +714,12 @@ def latest_report(phone, include_trends: bool = Query(default=False)):
     _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
     try:
-        path = fetch_pdf_path(
-            reqno, lambda: get_combined_report(shivam_reqid), include_trends=include_trends)
+        if source == "labit_core":
+            path = fetch_latest_visit_pdf(
+                phone, lambda: get_combined_report(shivam_reqid), include_trends=include_trends)
+        else:
+            path = fetch_pdf_path(
+                reqno, lambda: get_combined_report(shivam_reqid), include_trends=include_trends)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"latest report unavailable: {exc}") from exc
 
