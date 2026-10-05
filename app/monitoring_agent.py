@@ -2,9 +2,14 @@ import configparser
 import json
 import logging
 import os
+import shutil
+import socket
+import subprocess
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 
@@ -15,6 +20,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SERVICES_CONFIG_PATH = os.environ.get("MONITORING_SERVICES_INI", str(ROOT_DIR / "services.ini"))
 LOG_PATH = os.environ.get("MONITORING_LOG_PATH", str(ROOT_DIR / "logs" / "monitoring.log"))
 ALERT_STATE_PATH = os.environ.get("MONITORING_ALERT_STATE_PATH", str(ROOT_DIR / "logs" / "wan_alert_state.json"))
+HEALTH_STATE_PATH = os.environ.get("MONITORING_HEALTH_STATE_PATH", str(ROOT_DIR / "logs" / "local_health.json"))
+HEALTH_HOST = os.environ.get("MONITORING_HEALTH_HOST", "127.0.0.1")
+HEALTH_PORT = int(os.environ.get("MONITORING_HEALTH_PORT", "8090"))
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -25,6 +33,187 @@ def utc_now_iso():
 
 def now_ist_str():
     return datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
+
+
+def _read_meminfo():
+    values = {}
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, _, raw = line.partition(":")
+            parts = raw.strip().split()
+            if parts:
+                values[key] = int(parts[0]) * (1024 if len(parts) > 1 and parts[1].lower() == "kb" else 1)
+    except (FileNotFoundError, ValueError):
+        pass
+    return values
+
+
+def _machine_snapshot():
+    mem = _read_meminfo()
+    try:
+        uptime_seconds = float(Path("/proc/uptime").read_text().split()[0])
+    except (FileNotFoundError, IndexError, ValueError):
+        uptime_seconds = None
+
+    disk = shutil.disk_usage("/")
+    disk_used_pct = round((disk.total - disk.free) * 100 / disk.total, 1) if disk.total else None
+    mem_total = mem.get("MemTotal")
+    mem_available = mem.get("MemAvailable", mem.get("MemFree"))
+    mem_used_pct = round((mem_total - mem_available) * 100 / mem_total, 1) if mem_total and mem_available is not None else None
+    swap_total = mem.get("SwapTotal")
+    swap_free = mem.get("SwapFree")
+    swap_used_pct = round((swap_total - swap_free) * 100 / swap_total, 1) if swap_total and swap_free is not None else 0.0
+
+    pm2 = []
+    try:
+        result = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5, check=False)
+        if result.returncode == 0:
+            for item in json.loads(result.stdout or "[]"):
+                env = item.get("pm2_env") or {}
+                pm_uptime = env.get("pm_uptime")
+                pm2.append({
+                    "name": item.get("name"),
+                    "status": env.get("status", "unknown"),
+                    "restarts": env.get("restart_time", 0),
+                    "uptime_seconds": round(max(0, time.time() * 1000 - float(pm_uptime)) / 1000, 1) if isinstance(pm_uptime, (int, float)) else None,
+                })
+        else:
+            pm2 = [{"status": "unknown", "error": (result.stderr or "pm2 jlist failed")[:200]}]
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        pm2 = [{"status": "unknown", "error": str(exc)[:200]}]
+
+    systemd = {}
+    for unit in ("nginx", "tailscaled", "anydesk"):
+        try:
+            result = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=3, check=False)
+            systemd[unit] = result.stdout.strip() or "unknown"
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            systemd[unit] = f"unknown: {exc}"[:80]
+
+    machine_status = "healthy"
+    if ((disk_used_pct is not None and disk_used_pct >= 95) or
+            (mem_used_pct is not None and mem_used_pct >= 95)):
+        machine_status = "down"
+    elif ((disk_used_pct is not None and disk_used_pct >= 90) or
+            (mem_used_pct is not None and mem_used_pct >= 90) or swap_used_pct >= 90):
+        machine_status = "degraded"
+
+    pm2_statuses = [str(item.get("status", "unknown")).lower() for item in pm2]
+    if any(status in {"errored", "stopped", "stopping"} for status in pm2_statuses):
+        machine_status = "down"
+    elif any(status not in {"online"} for status in pm2_statuses):
+        machine_status = "degraded"
+    if systemd.get("nginx") != "active" or systemd.get("tailscaled") != "active":
+        machine_status = "down"
+    elif systemd.get("anydesk") not in {"active", "unknown"} and machine_status == "healthy":
+        machine_status = "degraded"
+
+    return {
+        "status": machine_status,
+        "hostname": socket.gethostname(),
+        "uptime_seconds": round(uptime_seconds, 1) if uptime_seconds is not None else None,
+        "load_average": [round(value, 2) for value in os.getloadavg()],
+        "memory_used_percent": mem_used_pct,
+        "swap_used_percent": swap_used_pct,
+        "disk_root_used_percent": disk_used_pct,
+        "pm2": pm2,
+        "systemd": systemd,
+    }
+
+
+def _sanitize_service(row):
+    return {
+        "service_key": row.get("service_key"),
+        "category": row.get("category"),
+        "label": row.get("label"),
+        "status": row.get("status", "unknown"),
+        "latency_ms": row.get("latency_ms"),
+        "message": row.get("message"),
+        "checked_at": row.get("checked_at"),
+    }
+
+
+def _overall_health(services, machine, ingest_status):
+    statuses = [str(row.get("status", "unknown")).lower() for row in services]
+    statuses.append(str(machine.get("status", "unknown")).lower())
+    statuses.append(str(ingest_status or "unknown").lower())
+    if "down" in statuses:
+        return "down"
+    if "degraded" in statuses or "unknown" in statuses or not services:
+        return "degraded" if services else "unknown"
+    return "healthy"
+
+
+def _write_health_snapshot(payload=None, ingest_status="unknown", ingest_error=None):
+    payload = payload or {}
+    previous_services = {}
+    try:
+        previous = json.loads(Path(HEALTH_STATE_PATH).read_text())
+        previous_services = {
+            row.get("service_key"): row
+            for row in previous.get("services", [])
+            if row.get("service_key")
+        }
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+
+    for row in payload.get("services", []):
+        clean = _sanitize_service(row)
+        if clean.get("service_key"):
+            previous_services[clean["service_key"]] = clean
+
+    machine = _machine_snapshot()
+    snapshot = {
+        "status": _overall_health(list(previous_services.values()), machine, ingest_status),
+        "checked_at": utc_now_iso(),
+        "lab_id": payload.get("lab_id", ""),
+        "source": payload.get("source", "local-monitoring"),
+        "machine": machine,
+        "services": sorted(
+            previous_services.values(),
+            key=lambda row: (row.get("category") or "", row.get("label") or ""),
+        ),
+        "monitoring_uplink": {"status": ingest_status},
+    }
+    if ingest_error:
+        snapshot["monitoring_uplink"]["error"] = ingest_error[:300]
+
+    target = Path(HEALTH_STATE_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(snapshot, separators=(",", ":")))
+    temporary.replace(target)
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.split("?", 1)[0] != "/health":
+            self.send_error(404)
+            return
+        try:
+            body = Path(HEALTH_STATE_PATH).read_bytes()
+        except (FileNotFoundError, OSError):
+            body = json.dumps({
+                "status": "unknown",
+                "message": "Health snapshot not available yet",
+            }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    server = ThreadingHTTPServer((HEALTH_HOST, HEALTH_PORT), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, name="local-health", daemon=True)
+    thread.start()
+    logging.info("Local health endpoint listening on http://%s:%s/health", HEALTH_HOST, HEALTH_PORT)
+    return server
 
 
 def _load_alert_state():
@@ -370,6 +559,14 @@ def run_once(config_path=SERVICES_CONFIG_PATH):
 
 
 def run_forever(config_path=SERVICES_CONFIG_PATH):
+    try:
+        start_health_server()
+        _write_health_snapshot()
+    except OSError:
+        logging.exception("Local health endpoint failed to start")
+    except Exception:
+        logging.exception("Initial local health snapshot failed")
+
     config = load_services_config(config_path)
     monitoring_cfg = config["monitoring"]
     interval_seconds = int(monitoring_cfg.get("scheduler_tick_seconds", monitoring_cfg.get("interval_seconds", "60")))
@@ -394,8 +591,21 @@ def run_forever(config_path=SERVICES_CONFIG_PATH):
             config = load_services_config(config_path)
             payload, ran_sections = build_due_payload(config, last_run_by_service=last_run_by_service)
             if payload["services"]:
-                response = writer.send(payload)
-                logging.info("Monitoring ingest success: %s", json.dumps(response))
+                ingest_status = "healthy"
+                ingest_error = None
+                try:
+                    response = writer.send(payload)
+                    logging.info("Monitoring ingest success: %s", json.dumps(response))
+                except Exception as exc:
+                    ingest_status = "down"
+                    ingest_error = str(exc)
+                    logging.exception("Monitoring ingest failed: %s", exc)
+
+                try:
+                    _write_health_snapshot(payload, ingest_status, ingest_error)
+                except Exception as exc:
+                    logging.exception("Local health snapshot failed: %s", exc)
+
                 now_monotonic = time.monotonic()
                 for section_name in ran_sections:
                     last_run_by_service[section_name] = now_monotonic
@@ -403,6 +613,10 @@ def run_forever(config_path=SERVICES_CONFIG_PATH):
                 logging.info("Monitoring tick skipped: no services due")
         except Exception as exc:
             logging.exception("Monitoring cycle failed: %s", exc)
+            try:
+                _write_health_snapshot(ingest_status="down", ingest_error=str(exc))
+            except Exception:
+                logging.exception("Local health snapshot failed after monitoring error")
         time.sleep(interval_seconds)
 
 
