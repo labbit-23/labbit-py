@@ -262,7 +262,10 @@ def fetch_trend_data(mrno):
     return r.json()
 
 
-def mark_requisition_delivered(reqno, channel="whatsapp", scope="all", testids=None):
+def mark_requisition_delivered(
+    reqno, channel="whatsapp", scope="all", testids=None,
+    sent_at=None, external_event_id=None,
+):
     """Translate labit-py's legacy reqno-level delivery-status update into
     Core's report-level append-only delivery events.
 
@@ -280,6 +283,10 @@ def mark_requisition_delivered(reqno, channel="whatsapp", scope="all", testids=N
     }
     if testids:
         payload["testids"] = testids
+    if sent_at:
+        payload["sent_at"] = str(sent_at).strip()
+    if external_event_id:
+        payload["external_event_id"] = str(external_event_id).strip()
     try:
         r = requests.post(
             f"{LABIT_CORE_BASE_URL}/internal/dispatch/mark-requisition-delivered",

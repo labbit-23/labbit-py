@@ -58,9 +58,12 @@ app = FastAPI(
 
 class DeliveryStatusUpdateRequest(BaseModel):
     reqno: str
-    status: str
-    channel: str
-    message: str
+    channel_code: Optional[str] = None
+    sent_at: Optional[str] = None
+    external_event_id: Optional[str] = None
+    status: str = "S"
+    channel: Optional[str] = None
+    message: str = ""
     scope: Optional[str] = "all"
     testids: Optional[List[str]] = None
 
@@ -903,10 +906,12 @@ def delivery_status_update(payload: DeliveryStatusUpdateRequest):
         return fetch_update_delivery_status(
             payload.reqno,
             payload.status,
-            payload.channel,
+            payload.channel_code or payload.channel or "whatsapp",
             payload.message,
             scope=payload.scope or "all",
             testids=payload.testids,
+            sent_at=payload.sent_at,
+            external_event_id=payload.external_event_id,
         )
     except Exception as exc:
         raise HTTPException(
