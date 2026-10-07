@@ -644,6 +644,11 @@ def combined_report(
             printtype=printtype,
             reqno=reqno,
         ),
+        # Keep the Core-native combined render in sync with the plain-mode
+        # choice used by the lab-only and radiology-only routes. Without this
+        # passthrough, Core falls back to stored/default letterhead settings
+        # for the combined PDF even when the caller explicitly requested plain.
+        letterhead=False if plain else None,
     )
 
     return FileResponse(
