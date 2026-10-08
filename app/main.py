@@ -536,7 +536,11 @@ def special_report(
         def _no_legacy_special():
             raise Exception("SPECIAL_SCOPE_REQUIRES_LABIT_CORE")
 
-        path = fetch_pdf_path(reqno, _no_legacy_special, scope="special")
+        # 2026-10-08, director: the special send went out without letterhead (`plain` above was computed but never passed on, so Core
+        # fell back to each report's stored with_letterhead / the attachment's upload stamp). Lab and radiology sends are
+        # letterhead-on unless the caller asks for plain; the special bundle now matches: unset means letterhead ON (which also
+        # keeps the T&C page and dispatch sheet), an explicit plain request still means none.
+        path = fetch_pdf_path(reqno, _no_legacy_special, scope="special", letterhead=False if plain else True)
         return FileResponse(path, media_type="application/pdf", filename=f"{reqid}.pdf")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
