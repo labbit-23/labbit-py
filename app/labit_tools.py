@@ -163,7 +163,7 @@ def fetch_lookup(phone):
     return _get(f"/api/dispatch-lookup/{phone}")
 
 
-def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False, letterhead=None):
+def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False, letterhead=None, require_testids=False):
     """Drop-in replacement for report_fetcher.get_report()-family calls --
     labit-core's /api/dispatch-status/{reqno}/pdf now black-boxes core vs
     archive rendering itself (2026-08-30: "Make labit-core handle the
@@ -186,6 +186,8 @@ def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False, l
         params["include_trends"] = "true"
     if letterhead is not None:
         params["letterhead"] = "true" if letterhead else "false"
+    if require_testids:
+        params["require_testids"] = "true"
     url = f"{LABIT_CORE_BASE_URL}/api/dispatch-status/{reqno}/pdf"
     try:
         r = requests.get(url, params=params, auth=_auth(), timeout=(3, 30))

@@ -623,6 +623,8 @@ def lab_collated_report(
 def combined_report(
     reqid,
     reqno: Optional[str] = Query(default=None),
+    testids: Optional[str] = Query(default=None),
+    job: Optional[str] = Query(default=None),
     printtype: str = Query(default="1"),
     chkrephead: Optional[str] = Query(default=None),
     header_mode: str = Query(default="default"),
@@ -653,6 +655,12 @@ def combined_report(
         # passthrough, Core falls back to stored/default letterhead settings
         # for the combined PDF even when the caller explicitly requested plain.
         letterhead=False if plain else None,
+        # 2026-10-15 (R202610120075 / B12): the sender names the tests it reported ready and
+        # recorded as sent; the bundle must contain all of them or this 409s -- a WhatsApp
+        # send then fails visibly instead of delivering a subset. `job` only makes the link
+        # unique per send (WhatsApp reuses media by URL); it is not read.
+        testids=[t.strip() for t in testids.split(",") if t.strip()] if testids else None,
+        require_testids=bool(testids),
     )
 
     return FileResponse(

@@ -68,7 +68,7 @@ def fetch_report_status_by_reqid(reqid):
         return report_status.fetch_report_status_by_reqid(reqid)
 
 
-def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=False, letterhead=None):
+def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=False, letterhead=None, require_testids=False):
     """Drop-in replacement for main.py's PDF-fetching routes (/report,
     /reports, /radiologyreport, /lab_report -- the full sweep, 2026-08-30)
     -- report_sender_worker.py (py_utils, confirmed same
@@ -135,13 +135,14 @@ def fetch_pdf_path(reqno, old_fn, *, scope="all", testids=None, include_trends=F
         ",".join(sorted(testids)) if testids else "",
         "trends" if include_trends else "",
         "" if letterhead is None else ("letterhead" if letterhead else "plain"),
+        "strict" if require_testids else "",
     ])
     try:
         pdf_bytes = pdf_cache.get_or_render(
             cache_key,
             lambda: labit_tools.fetch_dispatch_pdf(
                 reqno, scope=scope, testids=testids, include_trends=include_trends,
-                letterhead=letterhead),
+                letterhead=letterhead, require_testids=require_testids),
         )
     except LabitCoreReportNotFound:
         return old_fn()
