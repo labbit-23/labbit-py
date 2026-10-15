@@ -68,6 +68,16 @@ def _auth():
     return (LABIT_CORE_SERVICE_USERNAME, LABIT_CORE_SERVICE_PASSWORD)
 
 
+class LabitCoreBundleIncomplete(Exception):
+    """labit-core answered 409: the reqno exists but the report bundle does not contain every
+    test the caller said was ready (require_testids). Carries core's own message so the HTTP
+    layer can return it as a 409, not a generic 500."""
+
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
 class LabitCoreReportNotFound(Exception):
     """Raised ONLY for a clean 404 -- this reqno/reqid genuinely doesn't
     exist in labit-core (a legacy-only reqno). report_backend.py catches
@@ -195,6 +205,12 @@ def fetch_dispatch_pdf(reqno, scope="all", testids=None, include_trends=False, l
         raise Exception(f"labit-core dispatch PDF call failed: {exc}") from exc
     if r.status_code == 404:
         raise LabitCoreReportNotFound(f"labit-core dispatch PDF: unknown requisition for {reqno}")
+    if r.status_code == 409:
+        try:
+            detail = r.json().get("detail") or r.text[:500]
+        except Exception:
+            detail = r.text[:500]
+        raise LabitCoreBundleIncomplete(str(detail))
     if not r.ok:
         raise Exception(f"labit-core dispatch PDF API failed: {r.status_code} {r.text[:500]}")
     return r.content

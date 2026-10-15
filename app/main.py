@@ -8,7 +8,7 @@ from app.req_lookup import fetch_reqids, fetch_reqid_direct
 from app.report_fetcher import get_report, get_combined_report
 from app.lab_report_fetcher import get_lab_collated_report
 from app.report_backend import fetch_report_status, fetch_report_status_by_reqid, fetch_pdf_path, fetch_lookup, fetch_requisitions_by_date as fetch_requisitions_by_date_bb, fetch_trend_data as fetch_trend_data_bb, fetch_outsourced_attachment_path, fetch_latest_visit_pdf
-from app.labit_tools import LabitCoreReportNotFound, fetch_document, fetch_core_price_list
+from app.labit_tools import LabitCoreBundleIncomplete, LabitCoreReportNotFound, fetch_document, fetch_core_price_list
 from app.report_fetcher import get_trend_report
 from app.trends_data_api import fetch_trends_data, TrendsDataError
 from app.delivery_api import (
@@ -641,27 +641,32 @@ def combined_report(
 
     _require_dispatch_allowed(reqid=shivam_reqid, reqno=reqno)
 
-    path = fetch_pdf_path(
-        reqno,
-        lambda: get_combined_report(
-            shivam_reqid,
-            include_header=not plain,
-            apply_radiology_background=not plain,
-            printtype=printtype,
-            reqno=reqno,
-        ),
-        # Keep the Core-native combined render in sync with the plain-mode
-        # choice used by the lab-only and radiology-only routes. Without this
-        # passthrough, Core falls back to stored/default letterhead settings
-        # for the combined PDF even when the caller explicitly requested plain.
-        letterhead=False if plain else None,
-        # 2026-10-15 (R202610120075 / B12): the sender names the tests it reported ready and
-        # recorded as sent; the bundle must contain all of them or this 409s -- a WhatsApp
-        # send then fails visibly instead of delivering a subset. `job` only makes the link
-        # unique per send (WhatsApp reuses media by URL); it is not read.
-        testids=[t.strip() for t in testids.split(",") if t.strip()] if testids else None,
-        require_testids=bool(testids),
-    )
+    try:
+        path = fetch_pdf_path(
+            reqno,
+            lambda: get_combined_report(
+                shivam_reqid,
+                include_header=not plain,
+                apply_radiology_background=not plain,
+                printtype=printtype,
+                reqno=reqno,
+            ),
+            # Keep the Core-native combined render in sync with the plain-mode
+            # choice used by the lab-only and radiology-only routes. Without this
+            # passthrough, Core falls back to stored/default letterhead settings
+            # for the combined PDF even when the caller explicitly requested plain.
+            letterhead=False if plain else None,
+            # 2026-10-15 (R202610120075 / B12): the sender names the tests it reported ready and
+            # recorded as sent; the bundle must contain all of them or this 409s -- a WhatsApp
+            # send then fails visibly instead of delivering a subset. `job` only makes the link
+            # unique per send (WhatsApp reuses media by URL); it is not read.
+            testids=[t.strip() for t in testids.split(",") if t.strip()] if testids else None,
+            require_testids=bool(testids),
+        )
+    except LabitCoreBundleIncomplete as exc:
+        # core refused a bundle that lacks tests the caller said were ready: say so (409 +
+        # reason) instead of an unhandled exception / 500.
+        raise HTTPException(status_code=409, detail=exc.detail)
 
     return FileResponse(
         path,
